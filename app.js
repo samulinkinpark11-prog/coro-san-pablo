@@ -35,7 +35,13 @@ async function notify(body, quiet){
     if(error) throw error;
     if(!quiet && data && typeof data.sent === 'number') toast(data.sent ? `📣 Aviso enviado a ${data.sent} móvil${data.sent>1?'es':''}` : '📣 Nadie tiene los avisos activados todavía');
     return data;
-  }catch(e){ console.warn('notify', e); if(!quiet) toast('⚠️ No se pudo enviar el aviso (¿falta configurar la función?)'); return null; }
+  }catch(e){
+    console.warn('notify', e);
+    let det = e && e.message || String(e);
+    try{ const r = e && e.context; if(r && typeof r.status==='number'){ let t=''; try{ t = await r.clone().text(); }catch(_){} det = `HTTP ${r.status}` + (t ? ` · ${t.slice(0,160)}` : ''); } }catch(_){}
+    if(!quiet){ sheet(`<h2>⚠️ No se pudo enviar el aviso</h2><p class="muted">Manda una captura de esto a quien configuró la app:</p><pre style="white-space:pre-wrap;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px">${esc(det)}</pre><button class="btn sec" data-act="closeSheet">Cerrar</button>`); }
+    return null;
+  }
 }
 const attOf = sid => D.att.filter(a => a.session_id === sid);
 const attGet = (sid, mid) => D.att.find(a => a.session_id === sid && a.member_id === mid);
