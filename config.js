@@ -10,9 +10,9 @@ window.CORO_CONFIG = {
 
   // EmailJS → aviso por correo cuando alguien se registra
   EMAILJS: {
-    SERVICE_ID: '',
-    TEMPLATE_ID: '',
-    PUBLIC_KEY: ''
+    SERVICE_ID: 'service_defhykl',
+    TEMPLATE_ID: 'template_a297mb7',
+    PUBLIC_KEY: 'oTYwlzDkwRMIvIzhX'
   },
 
   // Notificaciones al móvil con la app ntfy (suscríbete a este tema)
