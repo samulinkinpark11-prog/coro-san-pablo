@@ -205,14 +205,18 @@ function renderHoy(){
   const c = {present:0, late:0, absent:0, pending:0, left:0};
   const tol = Number(S.settings.tolerance)||0;
   s.order.forEach(id => { const a=s.att[id]; if(!a||a.status==='pending') c.pending++; else if(a.status==='absent') c.absent++; else { c.present++; if(a.leave) c.left++; if(a.arrive && rel(a.arrive,s.start)>tol) c.late++; } });
-  const items = s.order.map(id => {
+  const rowHtml = id => {
     const a = s.att[id] || {status:'pending'}; const m = member(id); const info = statusInfo(s,a);
     let acts = '';
     if(a.status==='pending') acts = `<button class="ic g" data-act="arrive" data-id="${id}">✓ Llegó</button><button class="ic r" data-act="absent" data-id="${id}">✗</button>`;
     else if(a.status==='present' && !a.leave) acts = `<button class="ic v" data-act="leave" data-id="${id}">Se va</button><button class="ic" data-act="edit" data-id="${id}">✎</button>`;
     else acts = `<button class="ic" data-act="edit" data-id="${id}">✎</button>`;
     return `<div class="p"><div class="dot ${info.dot}"></div><div class="info"><div class="name">${esc(m?m.name:a.name)}</div><div class="det">${info.txt}</div></div><div class="acts">${acts}</div></div>`;
-  }).join('');
+  };
+  const isPend = id => !s.att[id] || s.att[id].status==='pending';
+  const pend = s.order.filter(isPend), done = s.order.filter(id=>!isPend(id));
+  const items = (pend.length ? `<h3 style="margin-top:0">⏳ Faltan por llegar (${pend.length})</h3>${pend.map(rowHtml).join('')}` : '')
+    + (done.length ? `<h3 ${pend.length?'':'style="margin-top:0"'}>✅ Ya marcados (${done.length})</h3>${done.map(rowHtml).join('')}` : '');
   $app.innerHTML = `
     <div class="card">
       <div class="row" style="align-items:flex-start"><div><h2 style="margin:0">${fmtDate(s.date)}</h2><div class="muted">Quedada a las <b>${esc(s.start)}</b> · ahora ${nowHM()}</div></div>
@@ -285,7 +289,7 @@ function renderAjustes(){
       <input type="file" id="importFile" accept=".json,application/json" style="display:none">
       <button class="btn danger" data-act="wipe">Borrar todo</button>
     </div>
-    <p class="muted" style="text-align:center">Coro San Pablo · v1.0</p>`;
+    <p class="muted" style="text-align:center">Coro San Pablo · v1.1</p>`;
 }
 
 /* ============ HOJAS (ventanas) ============ */
@@ -369,7 +373,10 @@ const A = {
     s.att[el.dataset.id]=a; save(); sheet(''); render();
   },
   removeFromSession(el){ const s=openSession(); s.order=s.order.filter(i=>i!==el.dataset.id); delete s.att[el.dataset.id]; save(); sheet(''); render(); },
-  allOnTime(){ const s=openSession(); s.order.forEach(id=>{ if(!s.att[id]||s.att[id].status==='pending') s.att[id]={status:'present',arrive:s.start}; }); save(); render(); },
+  allOnTime(){ const s=openSession();
+    const pend = s.order.filter(id=>!s.att[id]||s.att[id].status==='pending').map(id=>member(id)?.name).filter(Boolean);
+    if(!confirm(`¿Seguro que han llegado TODOS a su hora (${s.start})?\n\n${pend.join(', ')}\n\nSi falta alguien, márcalo uno a uno.`)) return;
+    s.order.forEach(id=>{ if(!s.att[id]||s.att[id].status==='pending') s.att[id]={status:'present',arrive:s.start}; }); save(); render(); },
   addInSession(){
     const s=openSession();
     const fuera = S.members.filter(m=>!s.order.includes(m.id));
