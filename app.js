@@ -298,7 +298,7 @@ function userSheet(id){
   sheet(`<h2>${esc(p.full_name)}</h2><p class="muted" style="margin-top:-6px">@${esc(p.username)} · ${p.status==='pending'?'⏳ pendiente':p.status==='approved'?'✅ aceptado':'⛔ sin acceso'}</p>
     <label>Asociar a su nombre de la lista del coro</label>
     <select id="uMember"><option value="">— Sin asociar —</option><option value="__new">＋ Crear «${esc(p.full_name)}» en la lista</option>${opts}</select>
-    <label style="display:flex;align-items:center;gap:10px;color:var(--txt)"><input type="checkbox" id="uAdmin" style="width:22px;height:22px;flex:0 0 22px" ${p.is_admin?'checked':''} ${self?'disabled':''}> Súper usuario (puede pasar lista y gestionarlo todo)</label>
+    <label class="check"><input type="checkbox" id="uAdmin" ${p.is_admin?'checked':''} ${self?'disabled':''}> <span>⭐ Súper usuario<br><small class="muted">Puede pasar lista y gestionarlo todo</small></span></label>
     ${p.status!=='approved'
       ? `<button class="btn" data-act="userSave" data-id="${id}" data-st="approved">✅ Aceptar</button>${p.status==='pending'?`<button class="btn danger" data-act="userSave" data-id="${id}" data-st="rejected">Rechazar</button>`:''}`
       : `<button class="btn" data-act="userSave" data-id="${id}" data-st="approved">Guardar</button>
