@@ -15,6 +15,9 @@ window.CORO_CONFIG = {
     PUBLIC_KEY: ''
   },
 
+  // Notificaciones al móvil con la app ntfy (suscríbete a este tema)
+  NTFY_TOPIC: 'coro-sanpablo-77779a7ed204',
+
   // Dominio interno para convertir el nombre de usuario en un "correo" (no se envía nada aquí)
   EMAIL_DOMAIN: 'corosanpablo.app'
 };

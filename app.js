@@ -141,6 +141,8 @@ async function boot(){
     loading = true; render();
     await loadAll(); loading = false;
     subscribe(); render();
+    const np = D.profiles.filter(p=>p.status==='pending').length;
+    if(isAdmin() && np) toast(`🔔 Tienes ${np} solicitud${np>1?'es':''} de acceso pendiente${np>1?'s':''} (pestaña Coro)`);
   } catch(e){ renderMsg('Sin conexión', 'No se ha podido conectar. Comprueba la cobertura y vuelve a intentarlo.'); }
   finally{ booting = false; }
 }
@@ -671,6 +673,11 @@ function readSettings(){
 
 /* ---------- aviso por correo (EmailJS) ---------- */
 function notifyAdmin(full_name, username){
+  const url = location.origin + location.pathname;
+  if(CFG.NTFY_TOPIC){
+    fetch('https://ntfy.sh/', { method:'POST', body: JSON.stringify({ topic:CFG.NTFY_TOPIC, title:'🔔 Nueva solicitud en el coro',
+      message:`${full_name} (@${username}) se ha registrado y espera que le aceptes.`, tags:['musical_note'], click:url, priority:4 }) }).catch(()=>{});
+  }
   const E = CFG.EMAILJS || {};
   if(!E.SERVICE_ID || !E.TEMPLATE_ID || !E.PUBLIC_KEY) return;
   fetch('https://api.emailjs.com/api/v1.0/email/send', { method:'POST', headers:{'Content-Type':'application/json'},
