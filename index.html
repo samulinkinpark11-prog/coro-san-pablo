@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#7a1f2b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Coro">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>Coro San Pablo · Lista y reparto</title>
+<style>
+:root{--vino:#7a1f2b;--vino2:#5e1620;--oro:#c9a227;--fondo:#faf6f0;--card:#fff;--txt:#2a1f1c;--sub:#7b6d66;--ok:#2e7d4f;--warn:#c26a00;--bad:#b3261e;--line:#eadfd3}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--fondo);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:16px}
+header{background:var(--vino);color:#fff;padding:calc(env(safe-area-inset-top) + 12px) 16px 12px;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:19px;font-weight:700;letter-spacing:.2px}
+header small{opacity:.85;font-size:13px}
+main{padding:14px 14px calc(env(safe-area-inset-bottom) + 90px);max-width:640px;margin:0 auto}
+nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:6}
+nav button{flex:1;background:none;border:0;padding:9px 0 8px;font-size:12px;color:var(--sub);display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button span{font-size:21px;line-height:1}
+nav button.on{color:var(--vino);font-weight:700}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(60,30,20,.08)}
+h2{font-size:17px;margin:4px 0 10px}
+h3{font-size:15px;margin:14px 0 8px;color:var(--sub);text-transform:uppercase;letter-spacing:.5px}
+label{display:block;font-size:14px;color:var(--sub);margin:10px 0 4px}
+input,select{width:100%;font-size:17px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--txt);-webkit-appearance:none;appearance:none}
+input[type=time],input[type=date]{min-height:46px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:11px;padding:12px 16px;font-size:16px;font-weight:600;background:var(--vino);color:#fff;width:100%;margin-top:10px}
+.btn.sec{background:#f1e8de;color:var(--vino2)}
+.btn.oro{background:var(--oro);color:#2a1f1c}
+.btn.danger{background:#fbe9e7;color:var(--bad)}
+.btn.sm{width:auto;padding:9px 12px;font-size:14px;margin:0}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+.stats{display:flex;gap:8px;margin:10px 0 2px}
+.stat{flex:1;background:#f6efe7;border-radius:10px;padding:8px;text-align:center}
+.stat b{display:block;font-size:20px}
+.stat small{font-size:11px;color:var(--sub)}
+.p{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+.p:last-child{border-bottom:0}
+.p .info{flex:1;min-width:0}
+.p .name{font-weight:600;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.p .det{font-size:13px;color:var(--sub);margin-top:2px}
+.p .acts{display:flex;gap:6px;flex-shrink:0}
+.dot{width:10px;height:10px;border-radius:50%;background:#ccc;flex-shrink:0}
+.dot.ok{background:var(--ok)}.dot.late{background:var(--warn)}.dot.abs{background:var(--bad)}.dot.left{background:#6b5bd6}
+.tag{font-size:12px;font-weight:600;padding:2px 7px;border-radius:20px;background:#eee;margin-left:4px}
+.tag.ok{background:#e3f3ea;color:var(--ok)}.tag.late{background:#fff1dd;color:var(--warn)}.tag.abs{background:#fbe9e7;color:var(--bad)}.tag.left{background:#ecebfb;color:#4b3cb8}
+.ic{border:0;background:#f1e8de;color:var(--vino2);border-radius:10px;padding:9px 11px;font-size:14px;font-weight:600}
+.ic.g{background:#e3f3ea;color:var(--ok)}.ic.r{background:#fbe9e7;color:var(--bad)}.ic.v{background:#ecebfb;color:#4b3cb8}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:8px 4px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--sub);font-weight:600;font-size:12px}
+td.n,th.n{text-align:right;white-space:nowrap}
+.muted{color:var(--sub);font-size:14px}
+.empty{text-align:center;color:var(--sub);padding:22px 8px}
+.sheet-bg{position:fixed;inset:0;background:rgba(30,15,10,.45);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--fondo);width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 18px)}
+.sheet h2{margin-top:0}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 80px);transform:translateX(-50%);background:#2a1f1c;color:#fff;padding:10px 16px;border-radius:20px;font-size:14px;z-index:30;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+.big{font-size:26px;font-weight:800;color:var(--vino)}
+.seg{display:flex;background:#f1e8de;border-radius:11px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:none;padding:9px 6px;border-radius:9px;font-size:14px;font-weight:600;color:var(--vino2)}
+.seg button.on{background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.hint{font-size:13px;color:var(--sub);margin-top:6px;line-height:1.4}
+.tramo{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.tramo input{padding:9px}
+.list-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.list-item:last-child{border-bottom:0}
+</style>
+</head>
+<body>
+<header><h1>🎶 Coro San Pablo</h1><small id="sub">Lista y reparto</small></header>
+<main id="app"></main>
+<nav>
+  <button data-tab="hoy" class="on"><span>📋</span>Hoy</button>
+  <button data-tab="gente"><span>👥</span>Coro</button>
+  <button data-tab="historial"><span>📒</span>Historial</button>
+  <button data-tab="ajustes"><span>⚙️</span>Ajustes</button>
+</nav>
+<div id="sheet"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ DATOS ============ */
+const KEY = 'coro-sanpablo-v1';
+const DEF = {
+  members: [],
+  sessions: [],
+  settings: {
+    tolerance: 5,            // minutos de cortesía (llegar tarde / irse antes)
+    mode: 'proporcional',    // 'proporcional' | 'tramos'
+    start: '18:00',          // hora de quedada por defecto
+    tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
+  }
+};
+let memStore = null;
+function load(){ try{ const s = localStorage.getItem(KEY); if(s) return JSON.parse(s); }catch(e){} return memStore; }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ memStore = JSON.parse(JSON.stringify(S)); } }
+let S = load() || JSON.parse(JSON.stringify(DEF));
+S.settings = Object.assign(JSON.parse(JSON.stringify(DEF.settings)), S.settings||{});
+
+/* ============ UTILIDADES ============ */
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const pad = n => String(n).padStart(2,'0');
+const nowHM = () => { const d=new Date(); return pad(d.getHours())+':'+pad(d.getMinutes()); };
+const today = () => { const d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); };
+const toMin = hm => { const [h,m] = String(hm).split(':').map(Number); return h*60+m; };
+// minutos desde la quedada (admite sesiones que cruzan medianoche)
+function rel(hm, start){ let d = toMin(hm) - toMin(start); if(d < -720) d += 1440; if(d > 720) d -= 1440; return d; }
+function durOf(start, end){ let d = toMin(end) - toMin(start); if(d <= 0) d += 1440; return d; }
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const eur = c => (c/100).toLocaleString('es-ES',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' €';
+const parseEur = v => { const n = parseFloat(String(v).replace(/\s/g,'').replace(',','.')); return isNaN(n)?0:n; };
+const fmtDate = d => { try{ return new Date(d+'T12:00:00').toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'}); }catch(e){ return d; } };
+const minTxt = m => m >= 60 ? Math.floor(m/60)+' h '+(m%60? (m%60)+' min':'') : m+' min';
+const member = id => S.members.find(m => m.id === id);
+const openSession = () => S.sessions.find(s => !s.closed);
+
+/* ============ CÁLCULO DEL REPARTO ============ */
+function calc(s, end, botin, st){
+  st = st || S.settings;
+  const dur = durOf(s.start, end);
+  const tol = Number(st.tolerance)||0;
+  const rows = [];
+  for(const id of s.order){
+    const a = s.att[id] || {status:'pending'};
+    const m = member(id);
+    const r = {id, name: m ? m.name : (a.name||'?'), status: a.status, arrive:a.arrive||null, leave:a.leave||null, late:0, early:0, present:0, w:0};
+    if(a.status === 'present'){
+      let ar = a.arrive ? rel(a.arrive, s.start) : 0;
+      if(ar < 0) ar = 0;
+      if(ar > dur) ar = dur;
+      if(ar <= tol) ar = 0;                 // dentro del margen de cortesía = a su hora
+      let lv = a.leave ? rel(a.leave, s.start) : dur;
+      if(lv > dur) lv = dur;
+      if(dur - lv <= tol) lv = dur;          // margen de cortesía al irse
+      if(lv < ar) lv = ar;
+      r.late = ar; r.early = dur - lv; r.present = lv - ar;
+      if(r.present > 0){
+        if(st.mode === 'tramos'){
+          const miss = r.late + r.early;
+          const t = [...st.tramos].sort((x,y)=>x.upto-y.upto).find(t => miss <= Number(t.upto));
+          r.w = (t ? Number(t.pct) : 0) / 100;
+        } else {
+          r.w = r.present / dur;
+        }
+      }
+    }
+    rows.push(r);
+  }
+  const sum = rows.reduce((acc,r)=>acc+r.w, 0);
+  const cents = Math.round((botin||0)*100);
+  rows.forEach(r => { r.exact = sum ? cents*r.w/sum : 0; r.cents = Math.floor(r.exact + 1e-9); });
+  let left = cents - rows.reduce((acc,r)=>acc+r.cents, 0);
+  [...rows].filter(r=>r.w>0).sort((x,y)=>(y.exact-y.cents)-(x.exact-x.cents)).forEach(r => { if(left>0){ r.cents++; left--; } });
+  return {rows, dur, sum, cents};
+}
+
+/* ============ INTERFAZ ============ */
+let tab = 'hoy';
+const $app = document.getElementById('app');
+function toast(t){ const el=document.getElementById('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(toast._t); toast._t=setTimeout(()=>el.classList.remove('on'),1800); }
+function sheet(html){ document.getElementById('sheet').innerHTML = html ? `<div class="sheet-bg" data-act="closeSheet"><div class="sheet">${html}</div></div>` : ''; }
+
+function render(){
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab===tab));
+  const os = openSession();
+  document.getElementById('sub').textContent = os ? `Sesión abierta · ${fmtDate(os.date)} · quedada ${os.start}` : 'Lista y reparto';
+  ({hoy:renderHoy, gente:renderGente, historial:renderHistorial, ajustes:renderAjustes})[tab]();
+}
+
+function statusInfo(s, a){
+  const tol = Number(S.settings.tolerance)||0;
+  if(!a || a.status==='pending') return {dot:'', txt:'Sin marcar'};
+  if(a.status==='absent') return {dot:'abs', txt:'<span class="tag abs">No viene</span>'};
+  let late = a.arrive ? rel(a.arrive, s.start) : 0;
+  let t = `Llegó ${esc(a.arrive||s.start)} ` + (late>tol ? `<span class="tag late">${late} min tarde</span>` : `<span class="tag ok">a su hora</span>`);
+  if(a.leave) t += ` · se fue ${esc(a.leave)} <span class="tag left">antes</span>`;
+  return {dot: a.leave ? 'left' : (late>tol ? 'late':'ok'), txt:t};
+}
+
+function renderHoy(){
+  const s = openSession();
+  if(!s){
+    const n = S.members.filter(m=>m.active!==false).length;
+    $app.innerHTML = `
+      <div class="card">
+        <h2>Nueva sesión</h2>
+        <label>Fecha</label><input type="date" id="nsDate" value="${today()}">
+        <label>Hora de quedada</label><input type="time" id="nsStart" value="${esc(S.settings.start)}">
+        <p class="hint">Margen de cortesía: <b>${S.settings.tolerance} min</b> · Reparto: <b>${S.settings.mode==='tramos'?'por tramos':'proporcional al tiempo'}</b> (cámbialo en Ajustes).</p>
+        <button class="btn" data-act="startSession" ${n?'':'disabled style="opacity:.5"'}>▶️ Empezar a pasar lista</button>
+        ${n?'':'<p class="hint">Primero apunta a la gente del coro en la pestaña <b>Coro</b>.</p>'}
+      </div>
+      ${S.sessions.length?`<p class="muted" style="text-align:center">Llevas ${S.sessions.filter(x=>x.closed).length} sesión(es) en el historial.</p>`:''}`;
+    return;
+  }
+  const c = {present:0, late:0, absent:0, pending:0, left:0};
+  const tol = Number(S.settings.tolerance)||0;
+  s.order.forEach(id => { const a=s.att[id]; if(!a||a.status==='pending') c.pending++; else if(a.status==='absent') c.absent++; else { c.present++; if(a.leave) c.left++; if(a.arrive && rel(a.arrive,s.start)>tol) c.late++; } });
+  const items = s.order.map(id => {
+    const a = s.att[id] || {status:'pending'}; const m = member(id); const info = statusInfo(s,a);
+    let acts = '';
+    if(a.status==='pending') acts = `<button class="ic g" data-act="arrive" data-id="${id}">✓ Llegó</button><button class="ic r" data-act="absent" data-id="${id}">✗</button>`;
+    else if(a.status==='present' && !a.leave) acts = `<button class="ic v" data-act="leave" data-id="${id}">Se va</button><button class="ic" data-act="edit" data-id="${id}">✎</button>`;
+    else acts = `<button class="ic" data-act="edit" data-id="${id}">✎</button>`;
+    return `<div class="p"><div class="dot ${info.dot}"></div><div class="info"><div class="name">${esc(m?m.name:a.name)}</div><div class="det">${info.txt}</div></div><div class="acts">${acts}</div></div>`;
+  }).join('');
+  $app.innerHTML = `
+    <div class="card">
+      <div class="row" style="align-items:flex-start"><div><h2 style="margin:0">${fmtDate(s.date)}</h2><div class="muted">Quedada a las <b>${esc(s.start)}</b> · ahora ${nowHM()}</div></div>
+      <button class="ic" style="flex:0" data-act="editSession">✎</button></div>
+      <div class="stats">
+        <div class="stat"><b>${c.present}</b><small>presentes</small></div>
+        <div class="stat"><b>${c.late}</b><small>tarde</small></div>
+        <div class="stat"><b>${c.left}</b><small>se fueron</small></div>
+        <div class="stat"><b>${c.absent}</b><small>no vienen</small></div>
+      </div>
+      ${c.pending?`<button class="btn sec" data-act="allOnTime">✓ Marcar los ${c.pending} sin marcar como llegados a las ${esc(s.start)}</button>`:''}
+    </div>
+    <div class="card">${items || '<div class="empty">No hay nadie en la lista.</div>'}
+      <button class="btn sec" data-act="addInSession">＋ Añadir a alguien a la lista de hoy</button>
+    </div>
+    <button class="btn oro" data-act="closeAsk">💰 Terminar sesión y repartir</button>`;
+}
+
+function renderGente(){
+  const act = S.members.filter(m=>m.active!==false), ina = S.members.filter(m=>m.active===false);
+  const li = m => `<div class="list-item"><span>${esc(m.name)}</span><span class="row" style="flex:0;gap:6px">
+     <button class="ic" data-act="rename" data-id="${m.id}">✎</button>
+     <button class="ic ${m.active===false?'g':'r'}" data-act="toggleMember" data-id="${m.id}">${m.active===false?'Reactivar':'Quitar'}</button></span></div>`;
+  $app.innerHTML = `
+    <div class="card">
+      <h2>Gente apuntada (${act.length})</h2>
+      <div class="row"><input id="newName" placeholder="Nombre" autocomplete="off"><button class="btn sm" style="flex:0" data-act="addMember">Añadir</button></div>
+      <p class="hint">¿Muchos de golpe? <a href="#" data-act="bulkAsk">Pega una lista de nombres</a> (uno por línea).</p>
+      ${act.length ? act.sort((a,b)=>a.name.localeCompare(b.name,'es')).map(li).join('') : '<div class="empty">Todavía no hay nadie apuntado.</div>'}
+    </div>
+    ${ina.length?`<div class="card"><h3 style="margin-top:0">Ya no vienen</h3>${ina.map(li).join('')}<p class="hint">Se conservan para que el historial siga cuadrando.</p></div>`:''}`;
+}
+
+function renderHistorial(){
+  const closed = S.sessions.filter(s=>s.closed).sort((a,b)=> (b.date+b.start).localeCompare(a.date+a.start));
+  const tot = {};
+  closed.forEach(s => (s.result?.rows||[]).forEach(r => { const k=r.id; tot[k] = tot[k] || {name:r.name, cents:0, n:0, min:0}; tot[k].cents += r.cents; if(r.w>0){ tot[k].n++; tot[k].min += r.present; } const m=member(k); if(m) tot[k].name=m.name; }));
+  const totRows = Object.values(tot).sort((a,b)=>b.cents-a.cents);
+  const totalBotin = closed.reduce((a,s)=>a+(s.result?.cents||0),0);
+  $app.innerHTML = `
+    <div class="card"><h2>Sesiones</h2>
+      ${closed.length ? closed.map(s=>`<div class="list-item" data-act="viewSession" data-id="${s.id}"><span><b>${fmtDate(s.date)}</b><br><span class="muted">${esc(s.start)}–${esc(s.end)} · ${(s.result?.rows||[]).filter(r=>r.w>0).length} personas</span></span><span class="big" style="font-size:18px">${eur(s.result?.cents||0)} ›</span></div>`).join('') : '<div class="empty">Aún no hay sesiones cerradas.</div>'}
+    </div>
+    ${totRows.length?`<div class="card"><h2>Acumulado</h2><p class="muted" style="margin-top:-4px">Total repartido: <b>${eur(totalBotin)}</b></p>
+      <table><tr><th>Persona</th><th class="n">Días</th><th class="n">Horas</th><th class="n">Total</th></tr>
+      ${totRows.map(t=>`<tr><td>${esc(t.name)}</td><td class="n">${t.n}</td><td class="n">${(t.min/60).toFixed(1)}</td><td class="n"><b>${eur(t.cents)}</b></td></tr>`).join('')}</table></div>`:''}`;
+}
+
+function renderAjustes(){
+  const st = S.settings;
+  $app.innerHTML = `
+    <div class="card"><h2>Reglas del reparto</h2>
+      <label>Hora de quedada habitual</label><input type="time" id="sStart" value="${esc(st.start)}">
+      <label>Margen de cortesía (minutos)</label><input type="number" inputmode="numeric" min="0" id="sTol" value="${st.tolerance}">
+      <p class="hint">Si alguien llega con menos de este retraso (o se va con menos de esta antelación), cuenta como si hubiera estado todo el rato.</p>
+      <label>Cómo se calcula lo que cobra cada uno</label>
+      <div class="seg"><button data-act="mode" data-v="proporcional" class="${st.mode!=='tramos'?'on':''}">Proporcional al tiempo</button><button data-act="mode" data-v="tramos" class="${st.mode==='tramos'?'on':''}">Por tramos</button></div>
+      ${st.mode==='tramos' ? `
+        <p class="hint">Se suman los minutos perdidos (llegar tarde + irse antes) y se aplica el porcentaje del tramo. 100% = una parte entera.</p>
+        ${[...st.tramos].sort((a,b)=>a.upto-b.upto).map((t,i)=>`<div class="tramo"><span class="muted" style="flex:0 0 auto">Hasta</span><input type="number" inputmode="numeric" data-tr="upto" data-i="${i}" value="${t.upto>=9999?'':t.upto}" placeholder="∞"><span class="muted" style="flex:0 0 auto">min →</span><input type="number" inputmode="numeric" data-tr="pct" data-i="${i}" value="${t.pct}"><span class="muted" style="flex:0 0 auto">%</span><button class="ic r" style="flex:0" data-act="delTramo" data-i="${i}">✕</button></div>`).join('')}
+        <button class="btn sec sm" data-act="addTramo">＋ Añadir tramo</button>
+        <p class="hint">Deja «Hasta» vacío en el último tramo para que cubra cualquier retraso mayor.</p>`
+      : `<p class="hint">Cada uno cobra según los minutos que ha estado. Ejemplo: sesión de 3 h, quien está 1,5 h cobra media parte. El botín se reparte entero entre los que vinieron.</p>`}
+      <button class="btn" data-act="saveSettings">Guardar reglas</button>
+    </div>
+    <div class="card"><h2>Copia de seguridad</h2>
+      <p class="hint" style="margin-top:0">Los datos se guardan en este móvil. Exporta de vez en cuando y guarda el archivo (o mándatelo por WhatsApp) para no perder nada o pasarlo a otro móvil.</p>
+      <button class="btn sec" data-act="export">⬇️ Exportar datos</button>
+      <button class="btn sec" data-act="importAsk">⬆️ Importar datos</button>
+      <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+      <button class="btn danger" data-act="wipe">Borrar todo</button>
+    </div>
+    <p class="muted" style="text-align:center">Coro San Pablo · v1.0</p>`;
+}
+
+/* ============ HOJAS (ventanas) ============ */
+function editSheet(id){
+  const s = openSession(); const a = s.att[id] || {status:'pending'}; const m = member(id);
+  sheet(`<h2>${esc(m?m.name:a.name)}</h2>
+    <label>Estado</label>
+    <select id="eSt"><option value="pending" ${a.status==='pending'?'selected':''}>Sin marcar</option><option value="present" ${a.status==='present'?'selected':''}>Presente</option><option value="absent" ${a.status==='absent'?'selected':''}>No viene (enfermo, etc.)</option></select>
+    <label>Hora de llegada</label><input type="time" id="eAr" value="${esc(a.arrive||s.start)}">
+    <label>Hora en que se fue (vacío = hasta el final)</label><input type="time" id="eLv" value="${esc(a.leave||'')}">
+    <div class="row"><button class="btn sec" data-act="clearLeave">Se queda hasta el final</button></div>
+    <button class="btn" data-act="saveEdit" data-id="${id}">Guardar</button>
+    <button class="btn danger" data-act="removeFromSession" data-id="${id}">Quitar de la lista de hoy</button>`);
+}
+
+function closeSheet(){
+  const s = openSession();
+  sheet(`<h2>Terminar sesión</h2>
+    <label>Hora de fin</label><input type="time" id="cEnd" value="${nowHM()}">
+    <label>Botín del día (€)</label><input id="cBotin" inputmode="decimal" placeholder="0,00" autocomplete="off">
+    <div id="cPrev" style="margin-top:12px"></div>
+    <button class="btn oro" data-act="confirmClose">Guardar y cerrar sesión</button>
+    <button class="btn sec" data-act="closeSheet">Seguir pasando lista</button>`);
+  const upd = () => {
+    const end = document.getElementById('cEnd').value || nowHM();
+    const r = calc(s, end, parseEur(document.getElementById('cBotin').value));
+    document.getElementById('cPrev').innerHTML = resultTable(r, true);
+  };
+  document.getElementById('cEnd').oninput = upd; document.getElementById('cBotin').oninput = upd; upd();
+}
+
+function resultTable(r, preview){
+  const rows = [...r.rows].sort((a,b)=>b.cents-a.cents || a.name.localeCompare(b.name,'es'));
+  return `${preview && r.dur>720?'<p class="hint" style="color:var(--bad)">⚠️ Más de 12 horas de sesión: revisa la hora de fin.</p>':''}<p class="muted">Duración: <b>${minTxt(r.dur)}</b>${preview?'':` · Reparto: ${r.mode==='tramos'?'por tramos':'proporcional'}`}</p>
+  <table><tr><th>Persona</th><th>Tiempo</th><th class="n">%</th><th class="n">Cobra</th></tr>
+  ${rows.map(x=>{
+    let t = x.status==='present' ? minTxt(x.present) : (x.status==='absent' ? 'No vino' : 'Sin marcar');
+    let notes = []; if(x.late) notes.push(`+${x.late}′ tarde`); if(x.early) notes.push(`−${x.early}′ antes`);
+    return `<tr><td>${esc(x.name)}</td><td>${t}${notes.length?`<br><span class="muted" style="font-size:12px">${notes.join(' · ')}</span>`:''}</td><td class="n">${Math.round(x.w*100)}%</td><td class="n"><b>${eur(x.cents)}</b></td></tr>`;}).join('')}
+  </table>${r.rows.some(x=>x.status==='pending')?'<p class="hint">⚠️ Quien está «sin marcar» cuenta como que no ha venido.</p>':''}`;
+}
+
+function shareText(s){
+  const r = s.result;
+  let t = `🎶 Coro San Pablo – ${fmtDate(s.date)} (${s.start}–${s.end})\nBotín: ${eur(r.cents)}\n\n`;
+  [...r.rows].filter(x=>x.cents>0).sort((a,b)=>b.cents-a.cents).forEach(x=>{ t += `• ${x.name}: ${eur(x.cents)}${x.late||x.early?` (${[x.late?x.late+' min tarde':'',x.early?'se fue '+x.early+' min antes':''].filter(Boolean).join(', ')})`:''}\n`; });
+  const no = r.rows.filter(x=>x.w===0).map(x=>x.name);
+  if(no.length) t += `\nNo vinieron: ${no.join(', ')}`;
+  return t;
+}
+
+function viewSession(id){
+  const s = S.sessions.find(x=>x.id===id);
+  sheet(`<h2>${fmtDate(s.date)} · ${esc(s.start)}–${esc(s.end)}</h2>
+    <div class="big">${eur(s.result.cents)}</div>
+    ${resultTable(s.result)}
+    <button class="btn" data-act="share" data-id="${id}">📤 Compartir (WhatsApp…)</button>
+    <button class="btn sec" data-act="reopen" data-id="${id}">Reabrir para corregir</button>
+    <button class="btn danger" data-act="delSession" data-id="${id}">Borrar esta sesión</button>`);
+}
+
+/* ============ ACCIONES ============ */
+const A = {
+  closeSheet: () => sheet(''),
+  startSession(){
+    if(openSession()) return;
+    const order = S.members.filter(m=>m.active!==false).sort((a,b)=>a.name.localeCompare(b.name,'es')).map(m=>m.id);
+    const att = {}; order.forEach(id => att[id] = {status:'pending'});
+    S.sessions.push({id:uid(), date:document.getElementById('nsDate').value||today(), start:document.getElementById('nsStart').value||S.settings.start, order, att, closed:false});
+    save(); render();
+  },
+  arrive(el){ const s=openSession(); s.att[el.dataset.id] = {status:'present', arrive:nowHM()}; save(); render(); toast('Llegada anotada a las '+nowHM()); },
+  absent(el){ const s=openSession(); s.att[el.dataset.id] = {status:'absent'}; save(); render(); },
+  leave(el){ const s=openSession(); const a=s.att[el.dataset.id]; if(!confirm(`¿${member(el.dataset.id)?.name||''} se va ahora (${nowHM()})?`)) return; a.leave=nowHM(); save(); render(); toast('Salida anotada'); },
+  edit(el){ editSheet(el.dataset.id); },
+  clearLeave(){ document.getElementById('eLv').value=''; },
+  saveEdit(el){
+    const s=openSession(); const st=document.getElementById('eSt').value;
+    const a = {status:st};
+    if(st==='present'){ a.arrive=document.getElementById('eAr').value||s.start; const lv=document.getElementById('eLv').value; if(lv) a.leave=lv; }
+    s.att[el.dataset.id]=a; save(); sheet(''); render();
+  },
+  removeFromSession(el){ const s=openSession(); s.order=s.order.filter(i=>i!==el.dataset.id); delete s.att[el.dataset.id]; save(); sheet(''); render(); },
+  allOnTime(){ const s=openSession(); s.order.forEach(id=>{ if(!s.att[id]||s.att[id].status==='pending') s.att[id]={status:'present',arrive:s.start}; }); save(); render(); },
+  addInSession(){
+    const s=openSession();
+    const fuera = S.members.filter(m=>!s.order.includes(m.id));
+    sheet(`<h2>Añadir a la lista de hoy</h2>
+      ${fuera.length?fuera.map(m=>`<div class="list-item"><span>${esc(m.name)}</span><button class="ic g" data-act="addExisting" data-id="${m.id}">Añadir</button></div>`).join(''):''}
+      <label>Persona nueva</label><div class="row"><input id="sNew" placeholder="Nombre"><button class="btn sm" style="flex:0" data-act="addNewInSession">Añadir</button></div>`);
+  },
+  addExisting(el){ const s=openSession(); const m=member(el.dataset.id); m.active=true; s.order.push(m.id); s.att[m.id]={status:'pending'}; save(); sheet(''); render(); },
+  addNewInSession(){ const n=document.getElementById('sNew').value.trim(); if(!n) return; const m={id:uid(),name:n,active:true}; S.members.push(m); const s=openSession(); s.order.push(m.id); s.att[m.id]={status:'pending'}; save(); sheet(''); render(); },
+  editSession(){
+    const s=openSession();
+    sheet(`<h2>Datos de la sesión</h2><label>Fecha</label><input type="date" id="esD" value="${esc(s.date)}"><label>Hora de quedada</label><input type="time" id="esS" value="${esc(s.start)}">
+      <button class="btn" data-act="saveSession">Guardar</button><button class="btn danger" data-act="cancelSession">Cancelar sesión (borrarla)</button>`);
+  },
+  saveSession(){ const s=openSession(); s.date=document.getElementById('esD').value||s.date; s.start=document.getElementById('esS').value||s.start; save(); sheet(''); render(); },
+  cancelSession(){ if(!confirm('¿Borrar la sesión de hoy y todo lo anotado?')) return; S.sessions=S.sessions.filter(x=>x.closed); save(); sheet(''); render(); },
+  closeAsk(){ closeSheet(); },
+  confirmClose(){
+    const s=openSession(); const end=document.getElementById('cEnd').value||nowHM(); const botin=parseEur(document.getElementById('cBotin').value);
+    if(!botin && !confirm('No has puesto el botín. ¿Cerrar igualmente con 0 €?')) return;
+    const r = calc(s, end, botin);
+    s.end=end; s.botin=botin; s.closed=true;
+    s.result = {cents:r.cents, dur:r.dur, mode:S.settings.mode, tolerance:S.settings.tolerance, rows:r.rows.map(x=>({id:x.id,name:x.name,status:x.status,late:x.late,early:x.early,present:x.present,w:x.w,cents:x.cents}))};
+    save(); tab='historial'; render(); viewSession(s.id);
+  },
+  viewSession(el){ viewSession(el.dataset.id); },
+  async share(el){
+    const s=S.sessions.find(x=>x.id===el.dataset.id); const t=shareText(s);
+    if(navigator.share){ try{ await navigator.share({text:t}); return; }catch(e){ if(e.name==='AbortError') return; } }
+    try{ await navigator.clipboard.writeText(t); toast('Copiado. Pégalo en WhatsApp'); }catch(e){ location.href='https://wa.me/?text='+encodeURIComponent(t); }
+  },
+  reopen(el){
+    if(openSession()){ alert('Ya hay una sesión abierta. Ciérrala primero.'); return; }
+    const s=S.sessions.find(x=>x.id===el.dataset.id); s.closed=false; delete s.result; save(); sheet(''); tab='hoy'; render();
+  },
+  delSession(el){ if(!confirm('¿Borrar esta sesión del historial?')) return; S.sessions=S.sessions.filter(x=>x.id!==el.dataset.id); save(); sheet(''); render(); },
+  addMember(){ const i=document.getElementById('newName'); const n=i.value.trim(); if(!n) return;
+    if(S.members.some(m=>m.name.toLowerCase()===n.toLowerCase()) && !confirm('Ya hay alguien con ese nombre. ¿Añadir igualmente?')) return;
+    S.members.push({id:uid(),name:n,active:true}); const s=openSession(); if(s){ const m=S.members[S.members.length-1]; s.order.push(m.id); s.att[m.id]={status:'pending'}; }
+    save(); render(); document.getElementById('newName').focus(); },
+  bulkAsk(){ sheet(`<h2>Pegar lista</h2><textarea id="bulk" rows="10" style="width:100%;font-size:16px;padding:10px;border-radius:10px;border:1px solid var(--line)" placeholder="María&#10;José&#10;Lucía"></textarea><button class="btn" data-act="bulkAdd">Añadir todos</button>`); },
+  bulkAdd(){ const names=document.getElementById('bulk').value.split(/\n|,/).map(x=>x.trim()).filter(Boolean); const s=openSession();
+    names.forEach(n=>{ if(!S.members.some(m=>m.name.toLowerCase()===n.toLowerCase())){ const m={id:uid(),name:n,active:true}; S.members.push(m); if(s){ s.order.push(m.id); s.att[m.id]={status:'pending'}; } } });
+    save(); sheet(''); render(); toast(names.length+' nombres procesados'); },
+  rename(el){ const m=member(el.dataset.id); const n=prompt('Nuevo nombre', m.name); if(n&&n.trim()){ m.name=n.trim(); save(); render(); } },
+  toggleMember(el){ const m=member(el.dataset.id); m.active = m.active===false; save(); render(); },
+  mode(el){ readSettings(); S.settings.mode=el.dataset.v; save(); render(); },
+  addTramo(){ readSettings(); S.settings.tramos.push({upto:90,pct:10}); save(); render(); },
+  delTramo(el){ readSettings(); const t=[...S.settings.tramos].sort((a,b)=>a.upto-b.upto); t.splice(Number(el.dataset.i),1); S.settings.tramos=t; save(); render(); },
+  saveSettings(){ readSettings(); save(); toast('Reglas guardadas'); render(); },
+  export(){
+    const data=JSON.stringify(S,null,1); const name=`coro-sanpablo-${today()}.json`;
+    const file = new File([data], name, {type:'application/json'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){ navigator.share({files:[file], title:name}).catch(()=>{}); return; }
+    const a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  },
+  importAsk(){ const f=document.getElementById('importFile'); f.onchange=()=>{ const file=f.files[0]; if(!file) return; const rd=new FileReader(); rd.onload=()=>{ try{ const d=JSON.parse(rd.result); if(!d.members||!d.sessions) throw 0; if(!confirm('Esto sustituye los datos de este móvil por los del archivo. ¿Seguir?')) return; S=d; S.settings=Object.assign(JSON.parse(JSON.stringify(DEF.settings)),S.settings||{}); save(); render(); toast('Datos importados'); }catch(e){ alert('El archivo no es válido.'); } }; rd.readAsText(file); }; f.click(); },
+  wipe(){ if(!confirm('¿Borrar TODOS los datos (gente, sesiones e historial)?')) return; if(!confirm('¿Seguro? No se puede deshacer.')) return; S=JSON.parse(JSON.stringify(DEF)); save(); render(); }
+};
+
+function readSettings(){
+  const st=S.settings;
+  const sS=document.getElementById('sStart'), sT=document.getElementById('sTol');
+  if(sS && sS.value) st.start=sS.value;
+  if(sT) st.tolerance=Math.max(0, parseInt(sT.value)||0);
+  const tr=[...st.tramos].sort((a,b)=>a.upto-b.upto);
+  document.querySelectorAll('[data-tr]').forEach(inp=>{ const i=Number(inp.dataset.i); if(!tr[i]) return; if(inp.dataset.tr==='upto') tr[i].upto = inp.value===''?9999:Math.max(0,parseInt(inp.value)||0); else tr[i].pct=Math.max(0,Math.min(100,parseInt(inp.value)||0)); });
+  st.tramos=tr;
+}
+
+/* ============ ARRANQUE ============ */
+function init(){
+  document.addEventListener('click', e => {
+    const n = e.target.closest('nav button'); if(n){ tab=n.dataset.tab; sheet(''); render(); window.scrollTo(0,0); return; }
+    const el = e.target.closest('[data-act]'); if(!el) return;
+    if(el.tagName==='A') e.preventDefault();
+    if(el.dataset.act==='closeSheet' && e.target!==el) return;
+    const f = A[el.dataset.act]; if(f) f(el);
+  });
+  document.addEventListener('keydown', e => { if(e.key==='Enter' && e.target.id==='newName') A.addMember(); });
+  setInterval(()=>{ if(tab==='hoy' && openSession() && !document.getElementById('sheet').innerHTML) render(); }, 30000);
+  try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){}
+  if('serviceWorker' in navigator && location.protocol==='https:'){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+  render();
+}
+if(typeof document!=='undefined' && document.getElementById('app')) init();
+</script>
+</body>
+</html>
