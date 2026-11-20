@@ -5,8 +5,8 @@
 // =====================================================
 window.CORO_CONFIG = {
   // Supabase → Project Settings → API
-  SUPABASE_URL: '',
-  SUPABASE_KEY: '',   // clave "anon public" o "publishable"
+  SUPABASE_URL: 'https://dhuqvjfwkkqtbaellgqj.supabase.co',
+  SUPABASE_KEY: 'sb_publishable_DSth3RS29M86a-nVjKav0w_Nc9c5il7',   // clave "anon public" o "publishable"
 
   // EmailJS → aviso por correo cuando alguien se registra
   EMAILJS: {
