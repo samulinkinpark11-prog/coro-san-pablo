@@ -1,37 +1,37 @@
 # 🎶 Coro San Pablo · Lista y reparto
 
-App web (PWA) para pasar lista en el coro de villancicos de la parroquia de San Pablo (Sevilla) y repartir el botín de cada día según el tiempo que ha estado cada uno. Funciona en iPhone y Android, también sin conexión.
+App web (PWA) del coro de villancicos de la parroquia de San Pablo (Sevilla): pasar lista en cada quedada y repartir el botín según el tiempo que ha estado cada uno. Funciona en iPhone y Android.
 
-## Qué hace
-- **Coro**: lista de la gente apuntada (se puede pegar una lista de nombres de golpe).
-- **Hoy**: se abre la sesión con la hora de quedada y se pasa lista:
-  - ✓ **Llegó** → apunta la hora actual (y marca si llega tarde).
-  - ✗ **No viene** (enfermo, etc.) → ese día no cobra.
-  - **Se va** → apunta la hora a la que se marcha antes.
-  - ✎ para corregir horas a mano.
-- **Terminar y repartir**: se pone la hora de fin y el botín, y calcula lo que le toca a cada uno. Se comparte por WhatsApp.
-- **Historial**: sesiones cerradas y acumulado por persona.
-- **Ajustes**: margen de cortesía, modo de reparto y copia de seguridad.
+## Quién puede hacer qué
+- **Súper usuarios**: pasan lista, cierran quedadas, gestionan la gente, aceptan registros, nombran a otros súper usuarios, cambian reglas y mueven el bote.
+- **Usuarios**: solo ven **Mis asistencias** (día, tiempo, lo ganado y el total acumulado) y el saldo del bote.
+- El **primero que se registra** se convierte en súper usuario automáticamente.
 
-## Reglas del reparto
-- **Margen de cortesía** (5 min por defecto): llegar o irse dentro de ese margen no penaliza.
-- **Proporcional al tiempo**: cada uno pesa según los minutos que ha estado. Sesión de 3 h → quien está 1,5 h cobra media parte.
-- **Por tramos**: se suman los minutos perdidos (tarde + irse antes) y se aplica el % del tramo (por defecto: hasta 10 min 100 %, hasta 30 min 75 %, hasta 60 min 50 %, más de 60 min 25 %).
-- El botín se reparte **entero** entre los que vinieron, en proporción a su parte. Los céntimos sobrantes se ajustan para que cuadre exacto.
+## Registro y acceso
+1. La persona se registra con nombre completo, usuario y contraseña → queda **pendiente**.
+2. Llega un correo de aviso (EmailJS) y aparece la solicitud en la pestaña **Coro**.
+3. Un súper usuario la acepta y la **asocia** a su nombre de la lista.
+4. Si alguien olvida la contraseña, un súper usuario le pone una nueva desde su ficha.
 
-## Publicarla con GitHub Pages
-1. En el repositorio: **Settings → Pages**.
-2. En *Source* elige **Deploy from a branch**, rama `main`, carpeta `/ (root)` y guarda.
-3. En un par de minutos estará en `https://<usuario>.github.io/<repositorio>/`.
+## Reparto
+- Botín − gastos del día = lo que se reparte.
+- **Proporcional al tiempo** o **por tramos** (Ajustes), con margen de cortesía.
+- Lo de cada uno se redondea **hacia abajo** (0,50 € por defecto); lo que sobra va al **bote común**.
+- Al cerrar cada quedada se guarda una **copia automática** completa en la base de datos (se conservan las 60 últimas).
 
-## Instalarla en el móvil
-- **iPhone (Safari)**: abrir el enlace → botón Compartir → **Añadir a pantalla de inicio**.
-- **Android (Chrome)**: abrir el enlace → menú ⋮ → **Instalar app** / Añadir a pantalla de inicio.
+## Archivos
+- `index.html`, `app.js` – la app.
+- `config.js` – claves de Supabase y EmailJS (públicas por diseño).
+- `supabase.sql` – estructura y permisos de la base de datos. Se pega en *Supabase → SQL Editor* y se ejecuta.
+- `sw.js`, `manifest.webmanifest`, `icon-*.png` – instalación en el móvil.
 
-## Importante: dónde se guardan los datos
-Los datos se guardan **en el móvil de quien pasa lista** (no en un servidor). Recomendado:
-- Que pase lista siempre la misma persona (o pasaros el archivo con *Exportar / Importar*).
-- Exportar una copia de vez en cuando (Ajustes → Exportar datos).
+## Puesta en marcha (una sola vez)
+1. Supabase → **SQL Editor** → pegar `supabase.sql` → **Run**.
+2. Supabase → **Authentication → Sign In / Providers → Email** → desactivar **Confirm email** → Save.
+3. Poner la URL y la clave *anon/publishable* en `config.js`.
+4. GitHub → Settings → Pages → rama `main`, carpeta `/ (root)`.
+5. El responsable se registra el primero.
 
-## Actualizar
-Al subir cambios al repo, la app se actualiza sola la próxima vez que se abra con conexión. Si cambias archivos, sube la versión de `CACHE` en `sw.js`.
+## Instalar en el móvil
+- **iPhone (Safari)**: Compartir → *Añadir a pantalla de inicio*.
+- **Android (Chrome)**: menú ⋮ → *Instalar app*.
