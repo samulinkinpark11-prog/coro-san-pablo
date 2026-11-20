@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v3.1';
+const VERSION = 'v3.2';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -800,10 +800,6 @@ function upcomingCard(){
 /* ---------- aviso por correo (EmailJS) ---------- */
 function notifyAdmin(full_name, username){
   const url = location.origin + location.pathname;
-  if(CFG.NTFY_TOPIC){
-    fetch('https://ntfy.sh/', { method:'POST', body: JSON.stringify({ topic:CFG.NTFY_TOPIC, title:'🔔 Nueva solicitud en el coro',
-      message:`${full_name} (@${username}) se ha registrado y espera que le aceptes.`, tags:['musical_note'], click:url, priority:4 }) }).catch(()=>{});
-  }
   const E = CFG.EMAILJS || {};
   if(!E.SERVICE_ID || !E.TEMPLATE_ID || !E.PUBLIC_KEY) return;
   fetch('https://api.emailjs.com/api/v1.0/email/send', { method:'POST', headers:{'Content-Type':'application/json'},
