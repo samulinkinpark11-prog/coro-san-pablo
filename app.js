@@ -115,7 +115,8 @@ function scheduleReload(){ clearTimeout(reloadT); reloadT = setTimeout(async ()=
   try{ const wasAdmin = isAdmin(), wasSt = me && me.status; await refreshMe();
        if(!me || me.status !== wasSt || isAdmin() !== wasAdmin) return boot();
        await loadAll(); render(); }catch(e){} }, 700); }
-async function refreshMe(){ if(!authUser) return; me = await q(sb.from('profiles').select('*').eq('id', authUser.id).maybeSingle(), true).catch(()=>me); }
+let meErr = '';
+async function refreshMe(){ if(!authUser) return; meErr = ''; me = await q(sb.from('profiles').select('*').eq('id', authUser.id).maybeSingle(), true).catch(e=>{ meErr = e.message || String(e); return me; }); }
 
 let channel = null;
 function subscribe(){
@@ -133,7 +134,7 @@ async function boot(){
     authUser = session ? session.user : null;
     if(!authUser){ me = null; renderAuth(); return; }
     await refreshMe();
-    if(!me){ renderMsg('No se encontró tu perfil', 'Vuelve a intentarlo en un momento.'); return; }
+    if(!me){ renderMsg('No se encontró tu perfil', 'Vuelve a intentarlo en un momento.' + (meErr ? `<br><small>Detalle: ${esc(meErr)}</small>` : '')); return; }
     if(me.status === 'pending'){ renderMsg('⏳ Solicitud pendiente', `Hola ${esc(me.full_name)}. Un responsable del coro tiene que aceptar tu registro. Vuelve a entrar más tarde.`); return; }
     if(me.status === 'rejected'){ renderMsg('Acceso no autorizado', 'Tu solicitud no ha sido aceptada. Habla con un responsable del coro.'); return; }
     tab = isAdmin() ? (['hoy','coro','historial','yo','ajustes'].includes(tab)?tab:'hoy') : 'yo';

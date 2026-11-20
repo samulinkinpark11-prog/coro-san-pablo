@@ -181,4 +181,27 @@ do $$ begin
   begin alter publication supabase_realtime add table public.profiles;   exception when others then null; end;
 end $$;
 
+-- ---------- PERMISOS DE ACCESO A TABLAS Y PERFILES QUE FALTEN ----------
+-- Permisos de acceso a las tablas (algunos proyectos nuevos de Supabase no los dan por defecto)
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+grant execute on all functions in schema public to authenticated;
+alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
+
+-- Crear el perfil a los usuarios que se registraron sin él (el más antiguo será súper usuario)
+insert into public.profiles (id, full_name, username, status, is_admin)
+select u.id,
+       coalesce(u.raw_user_meta_data->>'full_name', ''),
+       lower(coalesce(u.raw_user_meta_data->>'username', split_part(u.email, '@', 1))),
+       'pending', false
+from auth.users u
+where not exists (select 1 from public.profiles p where p.id = u.id)
+on conflict do nothing;
+
+update public.profiles set status = 'approved', is_admin = true
+where id = (select id from public.profiles order by created_at limit 1)
+  and not exists (select 1 from public.profiles where is_admin);
+
+
 select 'Listo ✅' as resultado;
