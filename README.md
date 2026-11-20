@@ -19,10 +19,19 @@ App web (PWA) del coro de villancicos de la parroquia de San Pablo (Sevilla): pa
 - Lo de cada uno se redondea **hacia abajo** (0,50 € por defecto); lo que sobra va al **bote común**.
 - Al cerrar cada quedada se guarda una **copia automática** completa en la base de datos (se conservan las 60 últimas).
 
+## Quedadas y avisos
+- Un súper usuario **programa** la quedada (fecha, hora y sitio) y a todos les llega un aviso.
+- Si cambia la fecha, la hora o el sitio, o se cancela, se avisa a todos.
+- **1 hora antes** llega un recordatorio con la hora y el sitio.
+- Al cerrar la quedada, cada uno recibe lo que le ha tocado; si luego se reajusta, recibe el cambio.
+- Cada usuario activa los avisos en **Lo mío / Mis asistencias → Activar avisos** (en iPhone, con la app instalada en la pantalla de inicio).
+- Los avisos los envía la función `supabase/functions/notify` (Supabase Edge Function) y el recordatorio lo lanza `pg_cron` cada 5 minutos.
+
 ## Archivos
 - `index.html`, `app.js` – la app.
 - `config.js` – claves de Supabase y EmailJS (públicas por diseño).
 - `supabase.sql` – estructura y permisos de la base de datos. Se pega en *Supabase → SQL Editor* y se ejecuta.
+- `supabase/functions/notify/index.ts` – función que envía los avisos al móvil.
 - `sw.js`, `manifest.webmanifest`, `icon-*.png` – instalación en el móvil.
 
 ## Puesta en marcha (una sola vez)

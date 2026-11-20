@@ -15,6 +15,9 @@ window.CORO_CONFIG = {
     PUBLIC_KEY: 'oTYwlzDkwRMIvIzhX'
   },
 
+  // Clave pública para los avisos al móvil (la privada está solo en Supabase)
+  VAPID_PUBLIC_KEY: 'BB8Iqv3e-T49hb-bkv0gC9En_r2ntP2LyQgUWFI8PRYT7RysjfoegNUJe2UlMc1XEuOyYnbX2CpNY4XZNcU1U2I',
+
   // Notificaciones al móvil con la app ntfy (suscríbete a este tema)
   NTFY_TOPIC: 'coro-sanpablo-77779a7ed204',
 

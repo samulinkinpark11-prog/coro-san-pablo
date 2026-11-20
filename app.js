@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v2.0';
+const VERSION = 'v3.0';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -25,7 +25,18 @@ const toCents = v => { let s = String(v||'').replace(/\s|€/g,''); if(s.include
 const fmtDate = d => { try{ return new Date(d+'T12:00:00').toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'}); }catch(e){ return d; } };
 const minTxt = m => m >= 60 ? Math.floor(m/60)+' h'+(m%60? ' '+(m%60)+' min':'') : m+' min';
 const member = id => D.members.find(m => m.id === id);
-const openSession = () => D.sessions.find(s => !s.closed);
+const openSession = () => D.sessions.find(s => !s.closed && s.started !== false);
+const plannedSessions = () => D.sessions.filter(s => !s.closed && s.started === false).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
+const mapUrl = p => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p + ', Sevilla');
+const placeHtml = s => s && s.place ? `📍 <a href="${mapUrl(s.place)}" target="_blank" rel="noopener">${esc(s.place)}</a>` : '<span class="muted">Sitio sin indicar</span>';
+async function notify(body, quiet){
+  try{
+    const { data, error } = await sb.functions.invoke('notify', { body });
+    if(error) throw error;
+    if(!quiet && data && typeof data.sent === 'number') toast(data.sent ? `📣 Aviso enviado a ${data.sent} móvil${data.sent>1?'es':''}` : '📣 Nadie tiene los avisos activados todavía');
+    return data;
+  }catch(e){ console.warn('notify', e); if(!quiet) toast('⚠️ No se pudo enviar el aviso (¿falta configurar la función?)'); return null; }
+}
 const attOf = sid => D.att.filter(a => a.session_id === sid);
 const attGet = (sid, mid) => D.att.find(a => a.session_id === sid && a.member_id === mid);
 const isAdmin = () => !!(me && me.is_admin && me.status === 'approved');
@@ -139,7 +150,7 @@ async function boot(){
     if(me.status === 'rejected'){ renderMsg('Acceso no autorizado', 'Tu solicitud no ha sido aceptada. Habla con un responsable del coro.'); return; }
     tab = isAdmin() ? (['hoy','coro','historial','yo','ajustes'].includes(tab)?tab:'hoy') : 'yo';
     loading = true; render();
-    await loadAll(); loading = false;
+    await loadAll(); await checkPush(); loading = false;
     subscribe(); render();
     const np = D.profiles.filter(p=>p.status==='pending').length;
     if(isAdmin() && np) toast(`🔔 Tienes ${np} solicitud${np>1?'es':''} de acceso pendiente${np>1?'s':''} (pestaña Coro)`);
@@ -198,7 +209,7 @@ function render(){
     : `<button data-tab="yo"><span>🙋</span>Mis asistencias</button>`;
   nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab===tab));
   const os = openSession();
-  if(isAdmin() && os) document.getElementById('sub').textContent = `Quedada abierta · ${fmtDate(os.date)} · ${os.start_time}`;
+  if(isAdmin() && os) document.getElementById('sub').textContent = `Quedada abierta · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
   if(loading){ document.getElementById('app').innerHTML = '<div class="empty">Cargando…</div>'; return; }
   const views = {hoy:renderHoy, coro:renderCoro, historial:renderHistorial, yo:renderYo, ajustes:renderAjustes};
   (isAdmin() ? (views[tab]||renderHoy) : renderYo)();
@@ -220,13 +231,21 @@ function renderHoy(){
   const s = openSession();
   if(!s){
     const n = D.members.filter(m=>m.active!==false).length;
+    const pl = plannedSessions();
     $.innerHTML = `
+      ${pl.length?`<div class="card"><h2>📅 Próximas quedadas</h2>
+        ${pl.map(p=>`<div class="list-item" style="align-items:flex-start"><span><b>${fmtDate(p.date)} · ${esc(p.start_time)}</b><br><span class="det">${placeHtml(p)}</span></span>
+          <span class="row" style="flex:0;gap:6px"><button class="ic" data-act="editPlanned" data-id="${p.id}">✎</button><button class="ic g" data-act="startPlanned" data-id="${p.id}" ${n?'':'disabled'}>▶️ Pasar lista</button></span></div>`).join('')}
+      </div>`:''}
       <div class="card"><h2>Nueva quedada</h2>
         <label>Fecha</label><input type="date" id="nsDate" value="${today()}">
         <label>Hora de quedada</label><input type="time" id="nsStart" value="${esc(S().start)}">
-        <p class="hint">Margen de cortesía: <b>${S().tolerance} min</b> · Reparto: <b>${S().mode==='tramos'?'por tramos':'proporcional al tiempo'}</b> · Redondeo: <b>${eur(S().step)}</b></p>
-        <button class="btn" data-act="startSession" ${n?'':'disabled style="opacity:.5"'}>▶️ Empezar a pasar lista</button>
+        <label>Sitio (punto exacto de encuentro)</label><input id="nsPlace" placeholder="p. ej. Puerta de la parroquia de San Pablo" autocomplete="off" value="${esc(S().place||'')}">
+        <button class="btn" data-act="planSession">📣 Programar y avisar a todos</button>
+        <button class="btn sec" data-act="startSession" ${n?'':'disabled style="opacity:.5"'}>▶️ Empezar ya a pasar lista (sin avisar)</button>
+        <p class="hint">Al programarla, a todos les llega un aviso con día, hora y sitio, y otro recordatorio 1 hora antes.</p>
         ${n?'':'<p class="hint">Primero apunta a la gente en la pestaña <b>Coro</b>.</p>'}
+        <p class="hint">Margen de cortesía: <b>${S().tolerance} min</b> · Reparto: <b>${S().mode==='tramos'?'por tramos':'proporcional al tiempo'}</b> · Redondeo: <b>${eur(S().step)}</b></p>
       </div>`;
     return;
   }
@@ -248,7 +267,7 @@ function renderHoy(){
     + (done.length ? `<h3 ${pend.length?'':'style="margin-top:0"'}>✅ Ya marcados (${done.length})</h3>${done.map(rowHtml).join('')}` : '');
   $.innerHTML = `
     <div class="card">
-      <div class="row" style="align-items:flex-start"><div><h2 style="margin:0">${fmtDate(s.date)}</h2><div class="muted">Quedada a las <b>${esc(s.start_time)}</b> · ahora ${nowHM()}</div></div>
+      <div class="row" style="align-items:flex-start"><div><h2 style="margin:0">${fmtDate(s.date)}</h2><div class="muted">Quedada a las <b>${esc(s.start_time)}</b> · ahora ${nowHM()}</div><div class="det" style="margin-top:4px">${placeHtml(s)}</div></div>
       <button class="ic" style="flex:0" data-act="editSession">✎</button></div>
       <div class="stats">
         <div class="stat"><b>${c.present}</b><small>presentes</small></div>
@@ -344,7 +363,7 @@ function renderYo(){
     const total = mine.reduce((acc,x)=>acc+x.a.amount_cents,0);
     const dias = mine.filter(x=>x.a.present_min>0).length;
     const mins = mine.reduce((acc,x)=>acc+x.a.present_min,0);
-    const open = D.sessions.find(s=>!s.closed && attGet(s.id, mid));
+    const open = D.sessions.find(s=>!s.closed && s.started!==false && attGet(s.id, mid));
     let hoy = '';
     if(open){ const a = attGet(open.id, mid); hoy = `<div class="card" style="border:2px solid var(--oro)"><b>Quedada en curso · ${fmtDate(open.date)} ${esc(open.start_time)}</b><div class="det" style="margin-top:6px">${statusInfo(open,a).txt}</div></div>`; }
     body = `${hoy}
@@ -361,7 +380,7 @@ function renderYo(){
       </div>`;
   }
   const bote = D.bote.reduce((a,b)=>a+b.amount_cents,0);
-  document.getElementById('app').innerHTML = body + `
+  document.getElementById('app').innerHTML = upcomingCard() + body + pushCard() + `
     <div class="card"><div class="row"><span class="muted">💰 Bote común del coro</span><b style="text-align:right">${eur(bote)}</b></div></div>
     <div class="card"><h2>Mi cuenta</h2><p class="muted" style="margin-top:-4px">@${esc(me.username)}</p>
       <label>Cambiar mi contraseña</label><div class="row"><input id="myPass" type="password" autocomplete="new-password" placeholder="nueva contraseña"><button class="btn sm sec" style="flex:0" data-act="myPass">Cambiar</button></div>
@@ -375,6 +394,7 @@ function renderAjustes(){
   document.getElementById('app').innerHTML = `
     <div class="card"><h2>Reglas del reparto</h2>
       <label>Hora de quedada habitual</label><input type="time" id="sStart" value="${esc(st.start)}">
+      <label>Sitio habitual (opcional)</label><input id="sPlace" value="${esc(st.place||'')}" placeholder="Se propone al crear cada quedada" autocomplete="off">
       <label>Margen de cortesía (minutos)</label><input type="number" inputmode="numeric" min="0" id="sTol" value="${st.tolerance}">
       <p class="hint">Si alguien llega con menos de este retraso (o se va con menos de esta antelación), cuenta como si hubiera estado todo el rato.</p>
       <label>Redondear lo de cada uno a</label>
@@ -468,6 +488,22 @@ function viewSession(id){
 }
 
 /* ---------- acciones ---------- */
+async function fillAttendance(sid){
+  const have = new Set(attOf(sid).map(a=>a.member_id));
+  const rows = D.members.filter(m=>m.active!==false && !have.has(m.id)).map(m=>({session_id:sid, member_id:m.id, status:'pending'}));
+  if(rows.length) await q(sb.from('attendance').insert(rows));
+}
+function sessionSheet(s){
+  if(!s) return;
+  const isOpen = s.started !== false;
+  sheet(`<h2>${isOpen?'Datos de la quedada':'Editar quedada programada'}</h2>
+    <label>Fecha</label><input type="date" id="esD" value="${esc(s.date)}">
+    <label>Hora de quedada</label><input type="time" id="esS" value="${esc(s.start_time)}">
+    <label>Sitio</label><input id="esP" value="${esc(s.place||'')}" placeholder="Punto exacto de encuentro" autocomplete="off">
+    <label class="check"><input type="checkbox" id="esN" checked> <span>📣 Avisar a todos del cambio</span></label>
+    <button class="btn" data-act="saveSession" data-id="${s.id}">Guardar</button>
+    <button class="btn danger" data-act="cancelSession" data-id="${s.id}">Cancelar quedada (borrarla)</button>`);
+}
 async function setAtt(sid, mid, patch){
   let a = attGet(sid, mid);
   if(!a){ a = {session_id:sid, member_id:mid, status:'pending', arrive:null, leave:null, late_min:0, early_min:0, present_min:0, weight:0, amount_cents:0}; D.att.push(a); }
@@ -491,6 +527,24 @@ async function backup(){
 
 const A = {
   closeSheet: () => sheet(''),
+  async enablePush(el){
+    const st = pushSupport();
+    if(st !== 'ok') return toast(st==='ios' ? 'Primero instala la app: Compartir → Añadir a pantalla de inicio, y ábrela desde ahí' : 'Este navegador no admite avisos');
+    if(!CFG.VAPID_PUBLIC_KEY) return toast('Falta configurar los avisos');
+    busy(el,true);
+    try{
+      const perm = await Notification.requestPermission();
+      if(perm !== 'granted'){ toast('No has dado permiso. Actívalo en Ajustes del móvil → Notificaciones'); return; }
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: b64ToBytes(CFG.VAPID_PUBLIC_KEY) });
+      const j = sub.toJSON();
+      await q(sb.from('push_subscriptions').upsert({ endpoint:j.endpoint, user_id:authUser.id, p256dh:j.keys.p256dh, auth:j.keys.auth }));
+      pushOn = true; render(); toast('🔔 Avisos activados en este móvil');
+    }catch(e){ console.warn(e); toast('⚠️ No se pudieron activar los avisos'); }
+    finally{ busy(el,false); }
+  },
+  async testPush(){ await notify({type:'test'}); },
   retry: () => boot(),
   authMode(el){ authMode = el.dataset.v; renderAuth(); },
   async login(el){
@@ -513,22 +567,40 @@ const A = {
       const res = await q(sb.auth.signUp({email:userEmail(u), password:p, options:{data:{full_name:name, username:u}}}));
       notifyAdmin(name, u);
       if(!res.session){ renderMsg('Solicitud enviada', 'Cuando un responsable te acepte, entra con tu usuario y contraseña.'); return; }
+      notify({type:'new_user'}, true);
       await boot();
     }catch(e){} finally{ busy(el,false); }
   },
-  async logout(){ try{ await sb.auth.signOut(); }catch(e){} if(channel){ try{ sb.removeChannel(channel); }catch(e){} channel=null; } me=null; authUser=null; authMode='login'; renderAuth(); },
+  async logout(){ try{ const sub = await currentSub(); if(sub) await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint); }catch(e){} try{ await sb.auth.signOut(); }catch(e){} if(channel){ try{ sb.removeChannel(channel); }catch(e){} channel=null; } me=null; authUser=null; authMode='login'; renderAuth(); },
   async myPass(){ const p = val('myPass')||''; if(p.length<6) return toast('Mínimo 6 caracteres'); try{ await q(sb.auth.updateUser({password:p})); toast('Contraseña cambiada'); document.getElementById('myPass').value=''; }catch(e){} },
 
   async startSession(el){
     if(openSession()) return;
     busy(el,true);
     try{
-      const s = await q(sb.from('sessions').insert({date:val('nsDate')||today(), start_time:val('nsStart')||S().start}).select().single());
-      const rows = D.members.filter(m=>m.active!==false).map(m=>({session_id:s.id, member_id:m.id, status:'pending'}));
-      if(rows.length) await q(sb.from('attendance').insert(rows));
+      const s = await q(sb.from('sessions').insert({date:val('nsDate')||today(), start_time:val('nsStart')||S().start, place:(val('nsPlace')||'').trim()||null, started:true}).select().single());
+      await fillAttendance(s.id);
       await loadAll(); render();
     }catch(e){ busy(el,false); }
   },
+  async planSession(el){
+    const date=val('nsDate'), time=val('nsStart'), place=(val('nsPlace')||'').trim();
+    if(!date || !time) return toast('Pon fecha y hora');
+    if(!place && !confirm('No has puesto el sitio. ¿Programar igualmente?')) return;
+    busy(el,true);
+    try{
+      const s = await q(sb.from('sessions').insert({date, start_time:time, place:place||null, started:false}).select().single());
+      await loadAll(); render(); await notify({type:'session_new', session_id:s.id});
+    }catch(e){ busy(el,false); }
+  },
+  async startPlanned(el){
+    if(openSession()) return toast('Ya hay una quedada abierta');
+    const s = D.sessions.find(x=>x.id===el.dataset.id); if(!s) return;
+    busy(el,true);
+    try{ await q(sb.from('sessions').update({started:true}).eq('id', s.id)); await fillAttendance(s.id); await loadAll(); render(); }
+    catch(e){ busy(el,false); }
+  },
+  editPlanned(el){ sessionSheet(D.sessions.find(x=>x.id===el.dataset.id)); },
   arrive(el){ const s=openSession(); setAtt(s.id, el.dataset.id, {status:'present', arrive:nowHM(), leave:null}); toast('Llegada anotada a las '+nowHM()); },
   absent(el){ const s=openSession(); setAtt(s.id, el.dataset.id, {status:'absent', arrive:null, leave:null}); },
   leave(el){ const s=openSession(); if(!confirm(`¿${member(el.dataset.id)?.name||''} se va ahora (${nowHM()})?`)) return; setAtt(s.id, el.dataset.id, {leave:nowHM()}); toast('Salida anotada'); },
@@ -558,15 +630,30 @@ const A = {
     try{ if(m.active===false) await q(sb.from('members').update({active:true}).eq('id',m.id)); m.active=true; await setAtt(s.id, m.id, {status:'pending'}); }catch(e){} },
   async addNewInSession(){ const n=(val('sNew')||'').trim(); if(!n) return; sheet('');
     try{ const m = await q(sb.from('members').insert({name:n}).select().single()); D.members.push(m); await setAtt(openSession().id, m.id, {status:'pending'}); }catch(e){} },
-  editSession(){
-    const s=openSession();
-    sheet(`<h2>Datos de la quedada</h2><label>Fecha</label><input type="date" id="esD" value="${esc(s.date)}"><label>Hora de quedada</label><input type="time" id="esS" value="${esc(s.start_time)}">
-      <button class="btn" data-act="saveSession">Guardar</button><button class="btn danger" data-act="cancelSession">Cancelar quedada (borrarla)</button>`);
+  editSession(){ sessionSheet(openSession()); },
+  async saveSession(el){
+    const s = D.sessions.find(x=>x.id===el.dataset.id); if(!s) return;
+    const before = {date:s.date, start_time:s.start_time, place:s.place};
+    const upd = {date:val('esD')||s.date, start_time:val('esS')||s.start_time, place:(val('esP')||'').trim()||null};
+    const changed = upd.date!==before.date || upd.start_time!==before.start_time || (upd.place||'')!==(before.place||'');
+    const avisar = document.getElementById('esN')?.checked;
+    sheet(''); if(!changed) return;
+    Object.assign(s, upd); render();
+    try{
+      await q(sb.from('sessions').update({...upd, reminded:false}).eq('id', s.id));
+      if(avisar) await notify({type:'session_changed', session_id:s.id, before});
+    }catch(e){ scheduleReload(); }
   },
-  async saveSession(){ const s=openSession(); s.date=val('esD')||s.date; s.start_time=val('esS')||s.start_time; sheet(''); render();
-    try{ await q(sb.from('sessions').update({date:s.date, start_time:s.start_time}).eq('id',s.id)); }catch(e){ scheduleReload(); } },
-  async cancelSession(){ if(!confirm('¿Borrar la quedada de hoy y todo lo anotado?')) return; const s=openSession(); sheet('');
-    try{ await q(sb.from('sessions').delete().eq('id',s.id)); await loadAll(); render(); }catch(e){} },
+  async cancelSession(el){
+    const s = D.sessions.find(x=>x.id===el.dataset.id); if(!s) return;
+    if(!confirm(`¿Cancelar y borrar la quedada del ${fmtDate(s.date)} a las ${s.start_time}?`)) return;
+    const avisar = document.getElementById('esN')?.checked;
+    sheet('');
+    try{
+      if(avisar) await notify({type:'session_cancelled', session:{id:s.id, date:s.date, start_time:s.start_time, place:s.place}});
+      await q(sb.from('sessions').delete().eq('id', s.id)); await loadAll(); render();
+    }catch(e){}
+  },
   closeAsk(){ closeSheet(); },
   async confirmClose(el){
     const s=openSession(); const end=val('cEnd')||nowHM(); const botin=toCents(val('cBotin')); const gastos=toCents(val('cGastos'));
@@ -584,6 +671,7 @@ const A = {
         duration_min:r.dur, mode:S().mode, tolerance:S().tolerance, step_cents:S().step}).eq('id', s.id));
       await loadAll(); await backup();
       tab='historial'; render(); viewSession(s.id); toast('Quedada guardada y copia hecha ✅');
+      notify({type:'payout', session_id:s.id});
     }catch(e){ busy(el,false); }
   },
   viewSession(el){ viewSession(el.dataset.id); },
@@ -664,11 +752,43 @@ function readSettings(){
   const st=S();
   const sS=document.getElementById('sStart'), sT=document.getElementById('sTol'), sP=document.getElementById('sStep');
   if(sS && sS.value) st.start=sS.value;
+  const sPl=document.getElementById('sPlace'); if(sPl) st.place=sPl.value.trim();
   if(sT) st.tolerance=Math.max(0, parseInt(sT.value)||0);
   if(sP) st.step=Number(sP.value)||50;
   const tr=[...st.tramos].sort((a,b)=>a.upto-b.upto);
   document.querySelectorAll('[data-tr]').forEach(inp=>{ const i=Number(inp.dataset.i); if(!tr[i]) return; if(inp.dataset.tr==='upto') tr[i].upto = inp.value===''?9999:Math.max(0,parseInt(inp.value)||0); else tr[i].pct=Math.max(0,Math.min(100,parseInt(inp.value)||0)); });
   st.tramos=tr;
+}
+
+/* ---------- avisos al móvil (Web Push) ---------- */
+let pushOn = false;
+function pushSupport(){
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+  if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return ios && !standalone ? 'ios' : 'no';
+  if(ios && !standalone) return 'ios';
+  return 'ok';
+}
+function b64ToBytes(b64){ const p='='.repeat((4-b64.length%4)%4); const s=atob((b64+p).replace(/-/g,'+').replace(/_/g,'/')); return Uint8Array.from([...s].map(c=>c.charCodeAt(0))); }
+async function currentSub(){ try{ if(!('serviceWorker' in navigator)) return null; const reg = await navigator.serviceWorker.getRegistration(); return reg && reg.pushManager ? await reg.pushManager.getSubscription() : null; }catch(e){ return null; } }
+async function checkPush(){
+  pushOn = false;
+  try{ if(pushSupport()==='ok' && Notification.permission==='granted'){ const sub = await currentSub(); if(sub){ pushOn = true;
+    const j = sub.toJSON(); sb.from('push_subscriptions').upsert({ endpoint:j.endpoint, user_id:authUser.id, p256dh:j.keys.p256dh, auth:j.keys.auth }).then(()=>{}); } } }catch(e){}
+}
+function pushCard(){
+  const st = pushSupport();
+  let inner;
+  if(pushOn) inner = `<p class="muted" style="margin-top:0">✅ Activados en este móvil. Te avisaremos de las quedadas, del recordatorio 1 h antes y de lo que ganas.</p>${isAdmin()?'<button class="btn sm sec" data-act="testPush">Enviarme un aviso de prueba</button>':''}`;
+  else if(st==='ios') inner = `<p class="muted" style="margin-top:0">Para recibir avisos en iPhone, primero instala la app: botón <b>Compartir</b> → <b>Añadir a pantalla de inicio</b>. Luego ábrela desde el icono y pulsa aquí.</p>`;
+  else if(st==='no') inner = `<p class="muted" style="margin-top:0">Este navegador no admite avisos. Prueba con Chrome (Android) o instalando la app (iPhone).</p>`;
+  else inner = `<p class="muted" style="margin-top:0">Recibe avisos de nuevas quedadas, cambios de hora o sitio, el recordatorio 1 h antes y lo que te toca en cada reparto.</p><button class="btn" data-act="enablePush">🔔 Activar avisos en este móvil</button>`;
+  return `<div class="card"><h2>🔔 Avisos</h2>${inner}</div>`;
+}
+function upcomingCard(){
+  const up = D.sessions.filter(s=>!s.closed).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
+  if(!up.length) return '';
+  return `<div class="card" style="border:2px solid var(--oro)"><h2>📅 Próximas quedadas</h2>${up.map(s=>`<div class="list-item"><span><b>${fmtDate(s.date)} · ${esc(s.start_time)}</b>${s.started!==false?' <span class="tag ok">en curso</span>':''}<br><span class="det">${placeHtml(s)}</span></span></div>`).join('')}</div>`;
 }
 
 /* ---------- aviso por correo (EmailJS) ---------- */

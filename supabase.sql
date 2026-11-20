@@ -75,6 +75,23 @@ create table if not exists public.backups (
   data jsonb not null
 );
 
+-- ---------- v3: sitio, quedadas programadas y notificaciones ----------
+alter table public.sessions add column if not exists place text;
+alter table public.sessions add column if not exists started boolean;          -- false = programada, true = pasando lista
+update public.sessions set started = true where started is null;              -- las que ya existían se empezaron
+alter table public.sessions alter column started set default false;
+alter table public.sessions alter column started set not null;
+alter table public.sessions add column if not exists reminded boolean not null default false;  -- recordatorio de 1 h enviado
+alter table public.attendance add column if not exists notified_cents int;   -- última cantidad avisada (para reajustes)
+
+create table if not exists public.push_subscriptions (
+  endpoint text primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz default now()
+);
+
 -- ---------- FUNCIONES AUXILIARES ----------
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -135,10 +152,11 @@ alter table public.attendance enable row level security;
 alter table public.settings   enable row level security;
 alter table public.bote       enable row level security;
 alter table public.backups    enable row level security;
+alter table public.push_subscriptions enable row level security;
 
 do $$ declare r record; begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public'
-           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups') loop
+           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions') loop
     execute format('drop policy %I on public.%I', r.policyname, r.tablename);
   end loop;
 end $$;
@@ -157,6 +175,8 @@ create policy sessions_admin on public.sessions for all using (public.is_admin()
 create policy sessions_self  on public.sessions for select using (
   id in (select a.session_id from public.attendance a where a.member_id = public.my_member())
 );
+-- Las quedadas que aún no se han cerrado (próximas) las ven todos los aceptados
+create policy sessions_upcoming on public.sessions for select using (public.is_approved() and not closed);
 
 -- Asistencias: súper usuarios todo; cada uno solo las suyas
 create policy attendance_admin on public.attendance for all using (public.is_admin()) with check (public.is_admin());
@@ -169,6 +189,9 @@ create policy settings_admin on public.settings for all using (public.is_admin()
 -- Bote: todos los aceptados lo ven; solo súper usuarios lo mueven
 create policy bote_read  on public.bote for select using (public.is_approved());
 create policy bote_admin on public.bote for all using (public.is_admin()) with check (public.is_admin());
+
+-- Avisos al móvil: cada uno gestiona sus propios dispositivos
+create policy push_own on public.push_subscriptions for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- Copias: solo súper usuarios
 create policy backups_admin on public.backups for all using (public.is_admin()) with check (public.is_admin());
