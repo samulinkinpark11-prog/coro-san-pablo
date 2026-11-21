@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.6';
+const VERSION = 'v4.7';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -482,6 +482,7 @@ function renderSup(){
   const people = D.members.map(m => ({m, st: memberStats(m.id)})).filter(x => x.m.active!==false || x.st.total>0)
     .sort((x,y)=> y.st.total-x.st.total || x.m.name.localeCompare(y.m.name,'es'));
   document.getElementById('app').innerHTML = `
+    <button class="btn" data-act="exportExcel" style="margin:0 0 12px">${IC('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13l4 5M12 13l-4 5"/>').replace('<svg','<svg width="20" height="20"')} Exportar a Excel</button>
     <div class="tiles">
       <div class="tile"><div class="l">Recaudado</div><div class="v g">${eur(sum('botin_cents'))}</div></div>
       <div class="tile"><div class="l">Repartido</div><div class="v">${eur(sum('repartido_cents'))}</div></div>
@@ -514,6 +515,71 @@ function memberSheet(mid){
     ${st.rows.length ? `<table><tr><th>Día</th><th>Motivo</th><th class="n">%</th><th class="n">Cobra</th></tr>${st.rows.map(({s,a}) => { const r = reasonOf(a);
       return `<tr><td><b>${fmtDate(s.date)}</b><br><span class="muted" style="font-size:12px">${esc(s.start_time)}–${esc(s.end_time)}</span></td><td><span class="tag ${r.c}" style="margin-left:0">${r.t}</span>${a&&a.present_min>0?`<br><span class="muted" style="font-size:12px">${minTxt(a.present_min)} cantando</span>`:''}</td><td class="n">${a?Math.round(Number(a.weight)*100):0}%</td><td class="n"><b>${eur(a?a.amount_cents:0)}</b></td></tr>`; }).join('')}</table>` : '<div class="empty">Aún no hay quedadas repartidas.</div>'}
     <button class="btn sec" data-act="closeSheet">Cerrar</button>`);
+}
+
+/* ----- EXPORTAR A EXCEL ----- */
+function loadScript(src){ return new Promise((ok, ko) => { if(window.XLSX) return ok(); const s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=()=>ko(new Error('No se pudo cargar el generador de Excel')); document.head.appendChild(s); }); }
+async function exportExcel(el){
+  busy(el,true);
+  try{
+    await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+    const X = window.XLSX, E = '#,##0.00 "€"';
+    const d = s => { const [y,m,dd] = s.split("-").map(Number); return new Date(y,m-1,dd); };
+    const e = c => Math.round(c||0)/100;
+    const closed = D.sessions.filter(s=>s.closed).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
+    const sum = f => closed.reduce((t,s)=>t+(s[f]||0),0);
+    const bote = D.bote.reduce((t,b)=>t+b.amount_cents,0);
+    const people = D.members.map(m => ({m, st: memberStats(m.id)})).filter(x => x.m.active!==false || x.st.total>0)
+      .sort((x,y)=> y.st.total-x.st.total || x.m.name.localeCompare(y.m.name,'es'));
+    const wb = X.utils.book_new();
+    function sheet(name, header, rows, fmt, widths){
+      const ws = X.utils.aoa_to_sheet([header, ...rows], {cellDates:true});
+      const range = X.utils.decode_range(ws['!ref']);
+      for(let R=1; R<=range.e.r; R++) for(const [c,z] of Object.entries(fmt||{})){ const cell = ws[X.utils.encode_cell({r:R, c:Number(c)})]; if(cell) cell.z = z; }
+      ws['!cols'] = (widths||header.map(h=>Math.max(10, String(h).length+2))).map(w=>({wch:w}));
+      ws['!autofilter'] = {ref: X.utils.encode_range({s:{r:0,c:0}, e:{r:Math.max(range.e.r,0), c:range.e.c}})};
+      X.utils.book_append_sheet(wb, ws, name);
+    }
+    // 1. Resumen
+    const ws0 = X.utils.aoa_to_sheet([
+      ['Coro San Pablo · Supervisión'], ['Exportado el', new Date().toLocaleString('es-ES')], [],
+      ['Quedadas repartidas', closed.length], ['Recaudado', e(sum('botin_cents'))], ['Gastos', e(sum('gastos_cents'))],
+      ['Repartido', e(sum('repartido_cents'))], ['Bote común (saldo)', e(bote)], ['Personas en la lista', people.length]]);
+    ['B5','B6','B7','B8'].forEach(k => { if(ws0[k]) ws0[k].z = E; });
+    ws0['!cols'] = [{wch:26},{wch:22}];
+    X.utils.book_append_sheet(wb, ws0, 'Resumen');
+    // 2. Por persona
+    sheet('Por persona',
+      ['Nombre','Sigue en el coro','Días asistidos','Quedadas','% asistencia','Horas cantando','Veces tarde','Minutos tarde (total)','Veces se fue antes','Faltas','Total ganado','Media por día asistido'],
+      people.map(({m,st}) => [m.name, m.active===false?'No':'Sí', st.dias, st.quedadas, st.quedadas?st.dias/st.quedadas:0, Math.round(st.mins/6)/10, st.tarde, st.minTarde, st.antes, st.faltas, e(st.total), st.dias?e(st.total/st.dias):0]),
+      {4:'0%', 10:E, 11:E}, [26,14,13,10,12,14,11,18,17,8,14,20]);
+    // 3. Por día
+    sheet('Por día',
+      ['Fecha','Inicio','Fin','Sitio','Duración (min)','Presentes','Botín','Gastos','Repartido','Al bote (redondeo)','Reparto','Margen cortesía (min)'],
+      closed.map(s => [d(s.date), s.start_time, s.end_time, s.place||'', s.duration_min||null, attOf(s.id).filter(a=>a.present_min>0).length, e(s.botin_cents), e(s.gastos_cents), e(s.repartido_cents), e(s.sobrante_cents), s.mode==='tramos'?'Por tramos':'Proporcional', s.tolerance??null]),
+      {0:'dd/mm/yyyy', 6:E, 7:E, 8:E, 9:E}, [12,8,8,34,14,10,12,10,12,18,13,20]);
+    // 4. Detalle (cada persona en cada quedada)
+    const det = [];
+    closed.forEach(s => people.forEach(({m}) => { const a = attGet(s.id, m.id), r = reasonOf(a);
+      det.push([d(s.date), s.start_time, s.end_time, m.name, r.t, a&&a.present_min>0?(a.arrive||s.start_time):'', a&&a.present_min>0?(a.leave||s.end_time):'', a?a.late_min||0:0, a?a.early_min||0:0, a?a.present_min||0:0, a?Number(a.weight)||0:0, e(a?a.amount_cents:0)]); }));
+    sheet('Detalle', ['Fecha','Inicio','Fin','Persona','Motivo','Llegó','Se fue','Min tarde','Min antes','Min cantando','% de parte','Cobra'],
+      det, {0:'dd/mm/yyyy', 10:'0%', 11:E}, [12,8,8,26,34,8,8,10,10,13,11,12]);
+    // 5. Una hoja por persona
+    const used = new Set(['Resumen','Por persona','Por día','Detalle']);
+    people.forEach(({m,st}) => {
+      let n = m.name.replace(/[\\/?*\[\]:]/g,' ').slice(0,31).trim() || 'Persona'; let k = 2; while(used.has(n)) n = n.slice(0,28)+' '+(k++); used.add(n);
+      const rows = st.rows.slice().reverse().map(({s,a}) => { const r = reasonOf(a); return [d(s.date), s.start_time+'–'+s.end_time, r.t, a?a.present_min||0:0, a?Number(a.weight)||0:0, e(a?a.amount_cents:0)]; });
+      rows.push([], ['Total', '', `${st.dias}/${st.quedadas} días`, st.mins, '', e(st.total)]);
+      sheet(n, ['Fecha','Horario','Motivo','Min cantando','% de parte','Cobra'], rows, {0:'dd/mm/yyyy', 4:'0%', 5:E}, [12,13,34,13,11,12]);
+    });
+    const out = X.write(wb, {bookType:'xlsx', type:'array', cellDates:true});
+    const name = `coro-san-pablo-supervision-${today()}.xlsx`;
+    const file = new File([out], name, {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){ try{ await navigator.share({files:[file], title:name}); }catch(err){} }
+    else { const link=document.createElement('a'); link.href=URL.createObjectURL(file); link.download=name; document.body.appendChild(link); link.click(); link.remove(); }
+    toast('Excel listo ✅');
+  }catch(err){ console.warn(err); toast('⚠️ No se pudo generar el Excel. Comprueba la conexión.'); }
+  finally{ busy(el,false); }
 }
 
 /* ----- CORO (gente + usuarios) ----- */
@@ -766,6 +832,7 @@ async function backup(){
 const A = {
   closeSheet: () => sheet(''),
   memberSheet(el){ memberSheet(el.dataset.id); },
+  exportExcel(el){ exportExcel(el); },
   supSession(el){ const s = D.sessions.find(x=>x.id===el.dataset.id); if(!s) return;
     sheet(`<h2>${fmtDate(s.date)} · ${esc(s.start_time)}–${esc(s.end_time)}</h2>${s.place?`<p class="muted" style="margin-top:-6px">${esc(s.place)}</p>`:''}${resultTable(storedResult(s))}<button class="btn sec" data-act="closeSheet">Cerrar</button>`); },
   calDay(el){ calSel = el.dataset.d; render(); },
