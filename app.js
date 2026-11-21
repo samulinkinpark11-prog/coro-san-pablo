@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.2';
+const VERSION = 'v4.3';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -55,7 +55,9 @@ const userEmail = u => `${u.toLowerCase()}@${CFG.EMAIL_DOMAIN || 'corosanpablo.a
 const S = () => D.settings;
 const IC = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const ICONS = {
-  hoy: IC('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>'),
+  hoy: IC('<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>'),
+  cal: IC('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>'),
+  bell: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
   coro: IC('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>'),
   historial: IC('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>'),
   yo: IC('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>'),
@@ -150,6 +152,7 @@ async function loadAll(){
       q(sb.from('backups').select('id,created_at').order('id',{ascending:false}).limit(1), true).catch(()=>[])
     ]);
     Object.assign(D, {members, sessions, att, profiles, bote});
+    await loadAlarms();
     D.lastBackup = bk && bk[0] ? bk[0].created_at : null;
   } else {
     const [members, sessions, att, bote] = await Promise.all([
@@ -159,7 +162,12 @@ async function loadAll(){
       q(sb.from('bote').select('amount_cents'))
     ]);
     Object.assign(D, {members, sessions, att, bote, profiles:[]});
+    await loadAlarms();
   }
+}
+async function loadAlarms(){
+  D.alarms = new Set();
+  try{ const { data, error } = await sb.from('session_alarms').select('session_id').eq('user_id', authUser.id); if(!error && data) D.alarms = new Set(data.map(x=>x.session_id)); }catch(e){}
 }
 let reloadT = null;
 function scheduleReload(){ clearTimeout(reloadT); reloadT = setTimeout(async ()=>{
@@ -188,7 +196,7 @@ async function boot(){
     if(!me){ renderMsg('No se encontró tu perfil', 'Vuelve a intentarlo en un momento.' + (meErr ? `<br><small>Detalle: ${esc(meErr)}</small>` : '')); return; }
     if(me.status === 'pending'){ renderMsg('⏳ Solicitud pendiente', `Hola ${esc(me.full_name)}. Un responsable del coro tiene que aceptar tu registro. Vuelve a entrar más tarde.`); return; }
     if(me.status === 'rejected'){ renderMsg('Acceso no autorizado', 'Tu solicitud no ha sido aceptada. Habla con un responsable del coro.'); return; }
-    tab = isAdmin() ? (['hoy','coro','historial','yo','ajustes'].includes(tab)?tab:'hoy') : 'yo';
+    tab = isAdmin() ? (['hoy','cal','coro','historial','yo','ajustes'].includes(tab)?tab:'hoy') : (['cal','yo'].includes(tab)?tab:'yo');
     loading = true; render();
     await loadAll(); await checkPush(); loading = false;
     subscribe(); render();
@@ -242,17 +250,18 @@ function render(){
   const pend = D.profiles.filter(p=>p.status==='pending').length;
   nav.innerHTML = isAdmin() ? `
     <button data-tab="hoy"><span>${ICONS.hoy}</span>Hoy</button>
+    <button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>
     <button data-tab="coro"><span>${ICONS.coro}${pend?`<i class="badge">${pend}</i>`:''}</span>Coro</button>
     <button data-tab="historial"><span>${ICONS.historial}</span>Historial</button>
     <button data-tab="yo"><span>${ICONS.yo}</span>Lo mío</button>
     <button data-tab="ajustes"><span>${ICONS.ajustes}</span>Ajustes</button>`
-    : `<button data-tab="yo"><span>${ICONS.yo}</span>Mis asistencias</button>`;
+    : `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button><button data-tab="yo"><span>${ICONS.yo}</span>Mis asistencias</button>`;
   nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab===tab));
   const os = activeSession();
   if(isAdmin() && os) document.getElementById('sub').textContent = `Quedada en curso · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
   if(loading){ document.getElementById('app').innerHTML = '<div class="empty">Cargando…</div>'; return; }
-  const views = {hoy:renderHoy, coro:renderCoro, historial:renderHistorial, yo:renderYo, ajustes:renderAjustes};
-  (isAdmin() ? (views[tab]||renderHoy) : renderYo)();
+  const views = {hoy:renderHoy, cal:renderCal, coro:renderCoro, historial:renderHistorial, yo:renderYo, ajustes:renderAjustes};
+  (isAdmin() ? (views[tab]||renderHoy) : (tab==='cal' ? renderCal : renderYo))();
 }
 
 function statusInfo(s, a){
@@ -335,6 +344,65 @@ function renderHoy(){
     ${isEnded(s)
       ? `<button class="btn oro" data-act="closeAsk">Introducir botín y repartir</button><button class="btn sec" data-act="resumeSession">Reanudar la quedada (no ha terminado)</button>`
       : `<button class="btn oro" data-act="endAsk">Terminar quedada</button><p class="hint" style="text-align:center">El botín se introduce después, cuando esté contado.</p>`}`;
+}
+
+/* ----- CALENDARIO ----- */
+let calMonth = null, calSel = null;
+function sessionState(s){
+  if(s.closed) return {t:'Hecha', c:''};
+  if(s.started===false) return {t:'Programada', c:'ok'};
+  if(s.end_time) return {t:'Pendiente de reparto', c:'late'};
+  return {t:'En curso', c:'left'};
+}
+function renderCal(){
+  const byDay = {};
+  D.sessions.forEach(s => { (byDay[s.date] = byDay[s.date] || []).push(s); });
+  if(!calSel){
+    const next = D.sessions.filter(s=>!s.closed && s.date>=today()).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time))[0];
+    calSel = next ? next.date : today();
+  }
+  if(!calMonth) calMonth = calSel.slice(0,7);
+  const [y,m] = calMonth.split('-').map(Number);
+  const first = new Date(y, m-1, 1), startDow = (first.getDay()+6)%7, nDays = new Date(y, m, 0).getDate();
+  const monthName = first.toLocaleDateString('es-ES',{month:'long', year:'numeric'});
+  const t = today();
+  let cells = '';
+  for(let i=0;i<startDow;i++) cells += '<span></span>';
+  for(let d=1; d<=nDays; d++){
+    const ds = `${y}-${pad(m)}-${pad(d)}`, has = byDay[ds];
+    const cls = ['cal-d', has?'has':'', ds===t?'today':'', ds===calSel?'sel':'', ds<t?'past':''].join(' ');
+    const lbl = new Date(y,m-1,d).toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'}) + (has ? `, ${has.length} quedada${has.length>1?'s':''}` : '');
+    cells += `<button class="${cls}" data-act="calDay" data-d="${ds}" aria-label="${lbl}" ${ds===calSel?'aria-pressed="true"':''}><span>${d}</span>${has?'<i class="dt"></i>':'<i class="dt0"></i>'}</button>`;
+  }
+  const inMonth = D.sessions.filter(s=>s.date.startsWith(calMonth));
+  const futureInMonth = inMonth.filter(s=>!s.closed && s.date>=t).length;
+  const sel = (byDay[calSel]||[]).sort((a,b)=>a.start_time.localeCompare(b.start_time));
+  const selTitle = new Date(calSel+'T12:00:00').toLocaleDateString('es-ES',{weekday:'long', day:'numeric', month:'long'});
+  const detail = sel.length ? sel.map(s => {
+    const st = sessionState(s), future = !s.closed && s.date >= t, on = D.alarms && D.alarms.has(s.id);
+    const mine = me.member_id && attGet(s.id, me.member_id);
+    return `<div class="card">
+      <div class="row" style="align-items:center"><div class="big" style="font-size:34px;flex:0 0 auto">${esc(s.start_time)}</div><span style="text-align:right"><span class="tag ${st.c}">${st.t}</span></span></div>
+      <div class="sitio" style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;line-height:1.35">${ICONS.pin}<span>${s.place?esc(s.place):'<span class="muted">Sitio sin indicar</span>'}</span></div>
+      ${s.closed && mine ? `<p class="muted" style="margin:10px 0 0">Tu parte: <b style="color:var(--oro)">${eur(mine.amount_cents)}</b></p>` : ''}
+      ${future ? `<button class="btn ${on?'sec':''}" data-act="toggleAlarm" data-id="${s.id}">${ICONS.bell} ${on?'Te avisaremos por la mañana · quitar':'Recordármelo por la mañana'}</button>` : ''}
+      <div class="row" style="margin-top:10px;gap:8px">
+        ${s.place?`<a class="btn sec sm" style="flex:1" href="${mapUrl(s.place)}" target="_blank" rel="noopener">Cómo llegar</a>`:''}
+        ${isAdmin() && !s.closed ? `<button class="btn sec sm" style="flex:1" data-act="calEdit" data-id="${s.id}">Editar</button>` : ''}
+      </div>
+    </div>`; }).join('')
+    : `<div class="card"><p class="muted" style="margin:0">No hay quedada este día.</p>${isAdmin() && calSel>=t ? `<button class="btn sec" data-act="calPlan" data-d="${calSel}">Programar una quedada este día</button>` : ''}</div>`;
+  document.getElementById('app').innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <button class="ic" style="flex:0" data-act="calMove" data-v="-1" aria-label="Mes anterior">‹</button>
+        <div style="text-align:center"><div style="font-size:19px;font-weight:700">${monthName.charAt(0).toUpperCase()+monthName.slice(1)}</div><div class="muted" style="font-size:13px">${futureInMonth ? `${futureInMonth} quedada${futureInMonth>1?'s':''} por delante` : 'Sin quedadas por delante este mes'}</div></div>
+        <button class="ic" style="flex:0" data-act="calMove" data-v="1" aria-label="Mes siguiente">›</button>
+      </div>
+      <div class="cal-grid" style="margin-top:14px">${['L','M','X','J','V','S','D'].map(w=>`<span class="cal-w">${w}</span>`).join('')}${cells}</div>
+    </div>
+    <h3 style="margin:6px 4px 8px;text-transform:none;letter-spacing:0;font-size:16px;color:var(--txt)">${selTitle.charAt(0).toUpperCase()+selTitle.slice(1)}</h3>
+    ${detail}`;
 }
 
 /* ----- CORO (gente + usuarios) ----- */
@@ -448,6 +516,8 @@ function renderAjustes(){
   document.getElementById('app').innerHTML = `
     <div class="card"><h2>Reglas del reparto</h2>
       <label>Hora de quedada habitual</label><input type="time" id="sStart" value="${esc(st.start)}">
+      <label>Hora del aviso de la mañana</label><input type="time" id="sMorning" value="${esc(st.morning||'09:00')}">
+      <p class="hint">A quien pulse «Recordármelo por la mañana» en el calendario le llega un aviso a esta hora el día de la quedada (si la quedada es muy temprano, hora y media antes).</p>
       <label>Sitio habitual (opcional)</label><input id="sPlace" value="${esc(st.place||'')}" placeholder="Se propone al crear cada quedada" autocomplete="off">
       <label>Margen de cortesía (minutos)</label><input type="number" inputmode="numeric" min="0" id="sTol" value="${st.tolerance}">
       <p class="hint">Si alguien llega con menos de este retraso (o se va con menos de esta antelación), cuenta como si hubiera estado todo el rato.</p>
@@ -581,6 +651,20 @@ async function backup(){
 
 const A = {
   closeSheet: () => sheet(''),
+  calDay(el){ calSel = el.dataset.d; render(); },
+  calMove(el){ const [y,m] = calMonth.split('-').map(Number); const d = new Date(y, m-1+Number(el.dataset.v), 1); calMonth = d.getFullYear()+'-'+pad(d.getMonth()+1); render(); },
+  calEdit(el){ sessionSheet(D.sessions.find(x=>x.id===el.dataset.id)); },
+  calPlan(el){ tab='hoy'; focusId=null; render(); const i=document.getElementById('nsDate'); if(i){ i.value = el.dataset.d; document.getElementById('nsPlace')?.focus(); } },
+  async toggleAlarm(el){
+    const id = el.dataset.id, on = D.alarms.has(id);
+    if(!on && !pushOn) return toast(pushSupport()==='ios' ? 'Primero instala la app y activa los avisos en Lo mío' : 'Primero activa los avisos en Lo mío / Mis asistencias');
+    busy(el,true);
+    try{
+      if(on){ await q(sb.from('session_alarms').delete().eq('session_id', id).eq('user_id', authUser.id)); D.alarms.delete(id); toast('Aviso de la mañana quitado'); }
+      else { await q(sb.from('session_alarms').upsert({session_id:id, user_id:authUser.id, sent:false})); D.alarms.add(id); toast(`Te avisaremos ese día a las ${S().morning||'09:00'}`); }
+      render();
+    }catch(e){ busy(el,false); }
+  },
   async enablePush(el){
     const st = pushSupport();
     if(st !== 'ok') return toast(st==='ios' ? 'Primero instala la app: Compartir → Añadir a pantalla de inicio, y ábrela desde ahí' : 'Este navegador no admite avisos');
@@ -829,6 +913,7 @@ function readSettings(){
   const sS=document.getElementById('sStart'), sT=document.getElementById('sTol'), sP=document.getElementById('sStep');
   if(sS && sS.value) st.start=sS.value;
   const sPl=document.getElementById('sPlace'); if(sPl) st.place=sPl.value.trim();
+  const sMo=document.getElementById('sMorning'); if(sMo && sMo.value) st.morning=sMo.value;
   if(sT) st.tolerance=Math.max(0, parseInt(sT.value)||0);
   if(sP) st.step=Number(sP.value)||50;
   const tr=[...st.tramos].sort((a,b)=>a.upto-b.upto);

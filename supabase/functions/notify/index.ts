@@ -91,6 +91,33 @@ async function payout(session) {
   return sent;
 }
 
+const toMin = (x) => { const [h, m] = String(x).split(':').map(Number); return h * 60 + m; };
+const hhmm = (t) => String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0');
+
+// Aviso de la mañana para quien lo pidió en el calendario
+async function morningAlarms(now) {
+  const day = now.slice(0, 10), nowMin = toMin(now.slice(11));
+  const { data: st } = await db.from('settings').select('data').eq('id', 1).maybeSingle();
+  const morning = (st && st.data && st.data.morning) || '09:00';
+  const { data: ss } = await db.from('sessions').select('*').eq('date', day).eq('closed', false);
+  let sent = 0;
+  for (const s of ss || []) {
+    let at = toMin(morning);
+    if (toMin(s.start_time) - at < 60) at = Math.max(0, toMin(s.start_time) - 90);   // quedada muy temprano
+    if (nowMin < at || nowMin >= toMin(s.start_time)) continue;
+    const { data: al } = await db.from('session_alarms').select('user_id').eq('session_id', s.id).eq('sent', false);
+    const users = (al || []).map((x) => x.user_id);
+    if (!users.length) continue;
+    sent += await push(users, {
+      title: '🔔 Hoy hay quedada del coro',
+      body: `A las ${s.start_time}${s.place ? ' en ' + s.place : ''}.`,
+      tag: 'alarma-' + s.id
+    });
+    await db.from('session_alarms').update({ sent: true }).eq('session_id', s.id).in('user_id', users);
+  }
+  return sent;
+}
+
 async function reminders() {
   const now = madridNow();
   const { data: ss } = await db.from('sessions').select('*').eq('closed', false).eq('reminded', false);
@@ -106,6 +133,7 @@ async function reminders() {
       await db.from('sessions').update({ reminded: true }).eq('id', s.id);
     }
   }
+  sent += await morningAlarms(now);
   return sent;
 }
 

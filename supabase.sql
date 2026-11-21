@@ -92,6 +92,15 @@ create table if not exists public.push_subscriptions (
   created_at timestamptz default now()
 );
 
+-- ---------- v4: aviso de la mañana elegido por cada uno ----------
+create table if not exists public.session_alarms (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  session_id uuid not null references public.sessions(id) on delete cascade,
+  sent boolean not null default false,
+  created_at timestamptz default now(),
+  primary key (user_id, session_id)
+);
+
 -- ---------- FUNCIONES AUXILIARES ----------
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -153,10 +162,11 @@ alter table public.settings   enable row level security;
 alter table public.bote       enable row level security;
 alter table public.backups    enable row level security;
 alter table public.push_subscriptions enable row level security;
+alter table public.session_alarms enable row level security;
 
 do $$ declare r record; begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public'
-           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions') loop
+           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions','session_alarms') loop
     execute format('drop policy %I on public.%I', r.policyname, r.tablename);
   end loop;
 end $$;
@@ -191,6 +201,7 @@ create policy bote_read  on public.bote for select using (public.is_approved());
 create policy bote_admin on public.bote for all using (public.is_admin()) with check (public.is_admin());
 
 -- Avisos al móvil: cada uno gestiona sus propios dispositivos
+create policy alarms_own on public.session_alarms for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy push_own on public.push_subscriptions for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- Copias: solo súper usuarios
