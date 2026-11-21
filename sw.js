@@ -1,5 +1,5 @@
 // Red primero (para recibir siempre las mejoras); caché solo si no hay cobertura.
-const CACHE = 'coro-v21';
+const CACHE = 'coro-v22';
 const FILES = ['./', './index.html', './app.js', './config.js', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).catch(()=>{})); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
@@ -29,6 +29,7 @@ self.addEventListener('notificationclick', e => {
   if (m) hash = '#cal=' + m[2];
   else if (/^pago-/.test(tag)) hash = '#yo';
   else if (/^solicitud-/.test(tag)) hash = '#coro';
+  else if (/^aviso-/.test(tag)) hash = '#avisos';
   const url = base.split('#')[0] + hash;
   e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(ws => {
     for (const w of ws) {

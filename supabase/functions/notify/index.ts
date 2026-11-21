@@ -171,6 +171,14 @@ Deno.serve(async (req) => {
       return json({ ok: true, sent: await push([me.id], { title: '✅ Avisos activados', body: 'Así te llegarán las notificaciones del coro.', tag: 'prueba' }) });
     }
 
+    if (type === 'announcement') {
+      const { data: an } = await db.from('announcements').select('*').eq('id', body.announcement_id).single();
+      if (!an) return json({ error: 'aviso no encontrado' }, 404);
+      return json({ ok: true, sent: await push(await approvedIds(an.audience === 'admins'), {
+        title: '📣 ' + (an.title || 'Aviso del coro'), body: an.body, tag: 'aviso-' + an.id
+      }) });
+    }
+
     if (type === 'session_cancelled') {
       const s = body.session || {};
       return json({ ok: true, sent: await push(await approvedIds(), {

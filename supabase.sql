@@ -113,6 +113,16 @@ create table if not exists public.session_rsvp (
 -- ---------- v4.5: responsables de la parroquia (solo supervisión, sin modificar nada) ----------
 alter table public.profiles add column if not exists is_supervisor boolean not null default false;
 
+-- ---------- v4.9: avisos libres de los súper usuarios ----------
+create table if not exists public.announcements (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default now(),
+  author uuid default auth.uid() references auth.users(id) on delete set null,
+  title text,
+  body text not null,
+  audience text not null default 'all' check (audience in ('all','admins'))
+);
+
 -- ---------- FUNCIONES AUXILIARES ----------
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -189,10 +199,11 @@ alter table public.backups    enable row level security;
 alter table public.push_subscriptions enable row level security;
 alter table public.session_alarms enable row level security;
 alter table public.session_rsvp enable row level security;
+alter table public.announcements enable row level security;
 
 do $$ declare r record; begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public'
-           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions','session_alarms','session_rsvp') loop
+           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions','session_alarms','session_rsvp','announcements') loop
     execute format('drop policy %I on public.%I', r.policyname, r.tablename);
   end loop;
 end $$;
@@ -230,6 +241,8 @@ create policy bote_read  on public.bote for select using (public.is_approved());
 create policy bote_admin on public.bote for all using (public.is_admin()) with check (public.is_admin());
 
 -- Avisos al móvil: cada uno gestiona sus propios dispositivos
+create policy ann_admin on public.announcements for all using (public.is_admin()) with check (public.is_admin());
+create policy ann_read  on public.announcements for select using (public.is_approved() and (audience = 'all' or public.is_admin()));
 create policy rsvp_own on public.session_rsvp for all using (user_id = auth.uid()) with check (user_id = auth.uid() and public.is_approved());
 create policy rsvp_admin on public.session_rsvp for select using (public.is_admin());
 create policy alarms_own on public.session_alarms for all using (user_id = auth.uid()) with check (user_id = auth.uid());
@@ -245,6 +258,7 @@ do $$ begin
   begin alter publication supabase_realtime add table public.members;    exception when others then null; end;
   begin alter publication supabase_realtime add table public.profiles;   exception when others then null; end;
   begin alter publication supabase_realtime add table public.session_rsvp; exception when others then null; end;
+  begin alter publication supabase_realtime add table public.announcements; exception when others then null; end;
 end $$;
 
 -- ---------- PERMISOS DE ACCESO A TABLAS Y PERFILES QUE FALTEN ----------

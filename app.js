@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.8';
+const VERSION = 'v4.9';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -157,7 +157,7 @@ async function loadAll(){
       q(sb.from('backups').select('id,created_at').order('id',{ascending:false}).limit(1), true).catch(()=>[])
     ]);
     Object.assign(D, {members, sessions, att, profiles, bote});
-    await Promise.all([loadAlarms(), loadRsvp()]);
+    await Promise.all([loadAlarms(), loadRsvp(), loadAnn()]);
     D.lastBackup = bk && bk[0] ? bk[0].created_at : null;
   } else {
     const [members, sessions, att, bote] = await Promise.all([
@@ -167,8 +167,12 @@ async function loadAll(){
       q(isSup() ? sb.from('bote').select('*').order('created_at',{ascending:false}) : sb.from('bote').select('amount_cents'))
     ]);
     Object.assign(D, {members, sessions, att, bote, profiles:[]});
-    await Promise.all([loadAlarms(), loadRsvp()]);
+    await Promise.all([loadAlarms(), loadRsvp(), loadAnn()]);
   }
+}
+async function loadAnn(){
+  D.ann = [];
+  try{ const { data } = await sb.from('announcements').select('*').order('created_at',{ascending:false}).limit(30); if(data) D.ann = data; }catch(e){}
 }
 async function loadRsvp(){
   D.rsvp = []; D.rsvpCount = {};
@@ -196,7 +200,7 @@ let channel = null;
 function subscribe(){
   if(channel) return;
   channel = sb.channel('coro-cambios');
-  ['attendance','sessions','members','profiles','session_rsvp'].forEach(t => channel.on('postgres_changes', {event:'*', schema:'public', table:t}, scheduleReload));
+  ['attendance','sessions','members','profiles','session_rsvp','announcements'].forEach(t => channel.on('postgres_changes', {event:'*', schema:'public', table:t}, scheduleReload));
   channel.subscribe();
 }
 
@@ -376,12 +380,20 @@ function applyDeepLink(){
     const id = h.split('=')[1]; const s = id && D.sessions.find(x => x.id === id);
     tab = 'cal';
     if(s){ calSel = s.date; calMonth = s.date.slice(0,7); }
-  } else if(h === '#yo') tab = 'yo';
+  } else if(h === '#yo' || h === '#avisos') tab = isAdmin() || !isSup() ? 'yo' : 'cal';
   else if(h === '#coro' && isAdmin()) tab = 'coro';
   render(); const app = document.getElementById('app'); if(app) app.scrollTop = 0;
 }
 
 /* ----- CALENDARIO ----- */
+function annCard(){
+  const lim = Date.now() - 14*86400000;
+  const list = (D.ann||[]).filter(x => new Date(x.created_at).getTime() > lim).slice(0,3);
+  if(!list.length) return '';
+  return `<div class="card" style="border-color:var(--oro)"><h2 style="display:flex;align-items:center;gap:8px">${ICONS.bell} Avisos</h2>
+    ${list.map(x=>`<div class="list-item" style="align-items:flex-start"><span><b>${esc(x.title||'Aviso del coro')}</b>${x.audience==='admins'?' <span class="tag late">solo súper</span>':''}<div style="white-space:pre-line;margin-top:4px;line-height:1.4">${esc(x.body)}</div><div class="muted" style="font-size:12px;margin-top:4px">${new Date(x.created_at).toLocaleString('es-ES',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div></span></div>`).join('')}
+  </div>`;
+}
 function jmjBanner(){
   const start = new Date(2027, 7, 3), end = new Date(2027, 7, 8, 23, 59);
   const now = new Date(); const dias = Math.ceil((start - new Date(now.toDateString()))/86400000);
@@ -463,7 +475,7 @@ function renderCal(){
       </div>
     </div>`; }).join('')
     : `<div class="card"><p class="muted" style="margin:0">No hay quedada este día.</p>${isAdmin() && calSel>=t ? `<button class="btn sec" data-act="calPlan" data-d="${calSel}">Programar una quedada este día</button>` : ''}</div>`;
-  document.getElementById('app').innerHTML = jmjBanner() + `
+  document.getElementById('app').innerHTML = annCard() + jmjBanner() + `
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <button class="ic" style="flex:0" data-act="calMove" data-v="-1" aria-label="Mes anterior">‹</button>
@@ -612,6 +624,11 @@ function renderCoro(){
     ${pend.length?`<div class="card" style="border:2px solid var(--oro)"><h2>🔔 Solicitudes de acceso (${pend.length})</h2>
       ${pend.map(p=>`<div class="list-item"><span><b>${esc(p.full_name)}</b><br><span class="muted">@${esc(p.username)} · ${new Date(p.created_at).toLocaleDateString('es-ES')}</span></span>
         <button class="ic g" style="flex:0" data-act="userSheet" data-id="${p.id}">Revisar</button></div>`).join('')}</div>`:''}
+    <div class="card"><h2>Enviar un aviso</h2>
+      <p class="hint" style="margin-top:-4px">Mensaje libre para todo el coro (o solo para súper usuarios). Llega como notificación y queda en la app 14 días.</p>
+      <button class="btn" data-act="annAsk">${ICONS.bell} Escribir aviso</button>
+      ${(D.ann||[]).length?`<details style="margin-top:10px"><summary>Avisos enviados (${D.ann.length})</summary>${D.ann.map(x=>`<div class="list-item" style="align-items:flex-start"><span><b>${esc(x.title||'Aviso del coro')}</b>${x.audience==='admins'?' <span class="tag late">solo súper</span>':''}<div class="muted" style="white-space:pre-line">${esc(x.body)}</div><div class="muted" style="font-size:12px">${new Date(x.created_at).toLocaleString('es-ES')}</div></span><button class="ic r" style="flex:0" data-act="annDel" data-id="${x.id}" aria-label="Borrar aviso">✕</button></div>`).join('')}</details>`:''}
+    </div>
     <div class="card">
       <h2>Gente apuntada (${act.length})</h2>
       <div class="row"><input id="newName" placeholder="Nombre" autocomplete="off"><button class="btn sm" style="flex:0" data-act="addMember">Añadir</button></div>
@@ -698,7 +715,7 @@ function renderYo(){
       </div>`;
   }
   const bote = D.bote.reduce((a,b)=>a+b.amount_cents,0);
-  document.getElementById('app').innerHTML = upcomingCard() + body + pushCard() + `
+  document.getElementById('app').innerHTML = annCard() + upcomingCard() + body + pushCard() + `
     <div class="card"><div class="row"><span class="muted">Bote común del coro</span><b style="text-align:right;color:var(--oro)">${eur(bote)}</b></div></div>
     <div class="card"><h2>Mi cuenta</h2><p class="muted" style="margin-top:-4px">@${esc(me.username)}</p>
       <label>Cambiar mi contraseña</label><div class="row"><input id="myPass" type="password" autocomplete="new-password" placeholder="nueva contraseña"><button class="btn sm sec" style="flex:0" data-act="myPass">Cambiar</button></div>
@@ -847,6 +864,27 @@ async function backup(){
 
 const A = {
   closeSheet: () => sheet(''),
+  annAsk(){
+    sheet(`<h2>Enviar un aviso</h2>
+      <label>Título (opcional)</label><input id="anT" maxlength="60" placeholder="Aviso del coro" autocomplete="off">
+      <label>Mensaje</label><textarea id="anB" rows="5" maxlength="500" placeholder="Ej.: Hoy cambiamos el ensayo a las 19:00 en la parroquia" style="resize:vertical"></textarea>
+      <label>¿A quién?</label><select id="anA"><option value="all">A todo el coro</option><option value="admins">Solo a súper usuarios (para probar)</option></select>
+      <button class="btn" data-act="annSend">Enviar aviso</button>
+      <button class="btn sec" data-act="closeSheet">Cancelar</button>`);
+  },
+  async annSend(el){
+    const body = (val('anB')||'').trim(), title = (val('anT')||'').trim(), audience = val('anA')||'all';
+    if(!body) return toast('Escribe el mensaje');
+    if(audience==='all' && !confirm('¿Enviar este aviso a todo el coro?')) return;
+    busy(el,true);
+    try{
+      const an = await q(sb.from('announcements').insert({title:title||null, body, audience}).select().single());
+      sheet(''); await loadAnn(); render();
+      await notify({type:'announcement', announcement_id: an.id});
+    }catch(e){ busy(el,false); }
+  },
+  async annDel(el){ if(!confirm('¿Borrar este aviso? Dejará de verse en la app (las notificaciones ya enviadas no se pueden retirar).')) return;
+    try{ await q(sb.from('announcements').delete().eq('id', el.dataset.id)); await loadAnn(); render(); }catch(e){} },
   memberSheet(el){ memberSheet(el.dataset.id); },
   exportExcel(el){ exportExcel(el); },
   supSession(el){ const s = D.sessions.find(x=>x.id===el.dataset.id); if(!s) return;
