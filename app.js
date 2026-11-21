@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.0';
+const VERSION = 'v4.1';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -26,6 +26,7 @@ const fmtDate = d => { try{ return new Date(d+'T12:00:00').toLocaleDateString('e
 const minTxt = m => m >= 60 ? Math.floor(m/60)+' h'+(m%60? ' '+(m%60)+' min':'') : m+' min';
 const member = id => D.members.find(m => m.id === id);
 const openSession = () => D.sessions.find(s => !s.closed && s.started !== false);
+const isEnded = s => !!(s && !s.closed && s.started !== false && s.end_time);   // terminada, pendiente de repartir
 const plannedSessions = () => D.sessions.filter(s => !s.closed && s.started === false).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
 const mapUrl = p => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p + ', Sevilla');
 const placeHtml = s => s && s.place ? `📍 <a href="${mapUrl(s.place)}" target="_blank" rel="noopener">${esc(s.place)}</a>` : '<span class="muted">Sitio sin indicar</span>';
@@ -63,6 +64,7 @@ function whenLabel(s){
   const diff = (new Date(y,mo-1,d,h,mi) - new Date())/60000;
   const t = today(); const tm = new Date(); tm.setDate(tm.getDate()+1);
   const man = tm.getFullYear()+'-'+pad(tm.getMonth()+1)+'-'+pad(tm.getDate());
+  if(isEnded(s)) return 'Terminada';
   if(s.started!==false && !s.closed) return 'En curso';
   if(s.date===t) return diff>0 && diff<120 ? `En ${Math.max(1,Math.round(diff))} min` : 'Hoy';
   if(s.date===man) return 'Mañana';
@@ -244,7 +246,7 @@ function render(){
     : `<button data-tab="yo"><span>${ICONS.yo}</span>Mis asistencias</button>`;
   nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab===tab));
   const os = openSession();
-  if(isAdmin() && os) document.getElementById('sub').textContent = `Quedada abierta · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
+  if(isAdmin() && os) document.getElementById('sub').textContent = `${isEnded(os)?'Pendiente de reparto':'Quedada abierta'} · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
   if(loading){ document.getElementById('app').innerHTML = '<div class="empty">Cargando…</div>'; return; }
   const views = {hoy:renderHoy, coro:renderCoro, historial:renderHistorial, yo:renderYo, ajustes:renderAjustes};
   (isAdmin() ? (views[tab]||renderHoy) : renderYo)();
@@ -293,7 +295,7 @@ function renderHoy(){
     const m = member(a.member_id); const info = statusInfo(s,a); const id = a.member_id;
     let acts = '';
     if(a.status==='pending') acts = `<button class="ic g" data-act="arrive" data-id="${id}">✓ Llegó</button><button class="ic r" data-act="absent" data-id="${id}">✗</button>`;
-    else if(a.status==='present' && !a.leave) acts = `<button class="ic v" data-act="leave" data-id="${id}">Se va</button><button class="ic" data-act="edit" data-id="${id}">✎</button>`;
+    else if(a.status==='present' && !a.leave && !isEnded(s)) acts = `<button class="ic v" data-act="leave" data-id="${id}">Se va</button><button class="ic" data-act="edit" data-id="${id}">✎</button>`;
     else acts = `<button class="ic" data-act="edit" data-id="${id}">✎</button>`;
     return `<div class="p"><div class="dot ${info.dot}"></div><div class="info"><div class="name">${esc(m?m.name:'?')}</div><div class="det">${info.txt}</div></div><div class="acts">${acts}</div></div>`;
   };
@@ -303,7 +305,8 @@ function renderHoy(){
     + (done.length ? `<h3 ${pend.length?'':'style="margin-top:0"'}>✅ Ya marcados (${done.length})</h3>${done.map(rowHtml).join('')}` : '');
   $.innerHTML = `
     <div class="card">
-      <div class="row" style="align-items:flex-start"><div><h2 style="margin:0">${fmtDate(s.date)}</h2><div class="muted">Quedada a las <b>${esc(s.start_time)}</b> · ahora ${nowHM()}</div><div class="det" style="margin-top:4px">${placeHtml(s)}</div></div>
+      ${isEnded(s)?`<div style="background:rgba(242,193,78,.14);color:var(--oro);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-weight:600">Quedada terminada a las ${esc(s.end_time)} · pendiente de contar el botín y repartir</div>`:''}
+      <div class="row" style="align-items:flex-start"><div><h2 style="margin:0">${fmtDate(s.date)}</h2><div class="muted">Quedada a las <b>${esc(s.start_time)}</b> · ${isEnded(s)?`terminó a las <b>${esc(s.end_time)}</b>`:`ahora ${nowHM()}`}</div><div class="det" style="margin-top:4px">${placeHtml(s)}</div></div>
       <button class="ic" style="flex:0" data-act="editSession">✎</button></div>
       <div class="stats">
         <div class="stat"><b>${c.present}</b><small>presentes</small></div>
@@ -316,7 +319,9 @@ function renderHoy(){
     <div class="card">${items || '<div class="empty">No hay nadie en la lista.</div>'}
       <button class="btn sec" data-act="addInSession">＋ Añadir a alguien a la lista de hoy</button>
     </div>
-    <button class="btn oro" data-act="closeAsk">💰 Terminar quedada y repartir</button>`;
+    ${isEnded(s)
+      ? `<button class="btn oro" data-act="closeAsk">Introducir botín y repartir</button><button class="btn sec" data-act="resumeSession">Reanudar la quedada (no ha terminado)</button>`
+      : `<button class="btn oro" data-act="endAsk">Terminar quedada</button><p class="hint" style="text-align:center">El botín se introduce después, cuando esté contado.</p>`}`;
 }
 
 /* ----- CORO (gente + usuarios) ----- */
@@ -468,8 +473,8 @@ function editSheet(mid){
 
 function closeSheet(){
   const s = openSession();
-  sheet(`<h2>Terminar quedada</h2>
-    <label>Hora de fin</label><input type="time" id="cEnd" value="${nowHM()}">
+  sheet(`<h2>Introducir botín y repartir</h2>
+    <label>Hora de fin</label><input type="time" id="cEnd" value="${esc(s.end_time||nowHM())}">
     <label>Botín del día (€)</label><input id="cBotin" inputmode="decimal" placeholder="0,00" autocomplete="off">
     <label>Gastos del día (€)</label><input id="cGastos" inputmode="decimal" placeholder="0,00" autocomplete="off">
     <div id="cPrev" style="margin-top:12px"></div>
@@ -691,6 +696,25 @@ const A = {
     }catch(e){}
   },
   closeAsk(){ closeSheet(); },
+  endAsk(){
+    const s=openSession(); const pend = attOf(s.id).filter(a=>a.status==='pending').length;
+    sheet(`<h2>Terminar quedada</h2>
+      <label>Hora de fin</label><input type="time" id="eEnd" value="${nowHM()}">
+      ${pend?`<p class="hint" style="color:var(--warn)">Hay ${pend} persona${pend>1?'s':''} sin marcar: contarán como que no han venido. Puedes corregirlo antes de repartir.</p>`:''}
+      <p class="hint">Se guarda la hora de fin. Cuando tengáis el botín contado, pulsa «Introducir botín y repartir».</p>
+      <button class="btn" data-act="endSession">Terminar quedada</button>
+      <button class="btn sec" data-act="closeSheet">Seguir pasando lista</button>`);
+  },
+  async endSession(el){
+    const s=openSession(); const end = val('eEnd') || nowHM();
+    busy(el,true);
+    try{ await q(sb.from('sessions').update({end_time:end}).eq('id', s.id)); s.end_time = end; sheet(''); render(); toast('Quedada terminada a las '+end); }
+    catch(e){ busy(el,false); }
+  },
+  async resumeSession(){
+    const s=openSession(); if(!confirm('¿Reanudar la quedada? Se borrará la hora de fin.')) return;
+    try{ await q(sb.from('sessions').update({end_time:null}).eq('id', s.id)); s.end_time = null; render(); }catch(e){}
+  },
   async confirmClose(el){
     const s=openSession(); const end=val('cEnd')||nowHM(); const botin=toCents(val('cBotin')); const gastos=toCents(val('cGastos'));
     if(!botin && !confirm('No has puesto el botín. ¿Cerrar igualmente con 0 €?')) return;
@@ -822,9 +846,11 @@ function pushCard(){
   return `<div class="card"><h2>Avisos</h2>${inner}</div>`;
 }
 function upcomingCard(){
-  const up = D.sessions.filter(s=>!s.closed).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
-  if(!up.length) return '';
-  return heroCard(up[0]) + (up.length>1 ? `<div class="card"><h2>Más adelante</h2>${up.slice(1).map(s=>`<div class="list-item"><span><b>${fmtDate(s.date)} · ${esc(s.start_time)}</b><br><span class="det">${placeHtml(s)}</span></span></div>`).join('')}</div>` : '');
+  const up = D.sessions.filter(s=>!s.closed && !isEnded(s)).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
+  const ended = D.sessions.filter(isEnded);
+  const pendCard = ended.map(s=>`<div class="card"><div class="row" style="align-items:flex-start"><div><b>Quedada del ${fmtDate(s.date)} terminada</b><div class="muted" style="margin-top:4px">Se está contando el botín. Cuando se reparta te llegará un aviso con lo tuyo.</div></div></div></div>`).join('');
+  if(!up.length) return pendCard;
+  return pendCard + heroCard(up[0]) + (up.length>1 ? `<div class="card"><h2>Más adelante</h2>${up.slice(1).map(s=>`<div class="list-item"><span><b>${fmtDate(s.date)} · ${esc(s.start_time)}</b><br><span class="det">${placeHtml(s)}</span></span></div>`).join('')}</div>` : '');
 }
 
 /* ---------- aviso por correo (EmailJS) ---------- */
