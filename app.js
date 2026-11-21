@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v3.4';
+const VERSION = 'v4.0';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -49,6 +49,35 @@ const isAdmin = () => !!(me && me.is_admin && me.status === 'approved');
 const sortName = (a,b) => (a.name||'').localeCompare(b.name||'', 'es');
 const userEmail = u => `${u.toLowerCase()}@${CFG.EMAIL_DOMAIN || 'corosanpablo.app'}`;
 const S = () => D.settings;
+const IC = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  hoy: IC('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>'),
+  coro: IC('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>'),
+  historial: IC('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>'),
+  yo: IC('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>'),
+  ajustes: IC('<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'),
+  pin: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;margin-top:1px"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>'
+};
+function whenLabel(s){
+  const [y,mo,d] = s.date.split('-').map(Number); const [h,mi] = s.start_time.split(':').map(Number);
+  const diff = (new Date(y,mo-1,d,h,mi) - new Date())/60000;
+  const t = today(); const tm = new Date(); tm.setDate(tm.getDate()+1);
+  const man = tm.getFullYear()+'-'+pad(tm.getMonth()+1)+'-'+pad(tm.getDate());
+  if(s.started!==false && !s.closed) return 'En curso';
+  if(s.date===t) return diff>0 && diff<120 ? `En ${Math.max(1,Math.round(diff))} min` : 'Hoy';
+  if(s.date===man) return 'Mañana';
+  const dd = Math.round((new Date(y,mo-1,d) - new Date(new Date().toDateString()))/86400000);
+  return dd>0 ? `En ${dd} días` : '';
+}
+function heroCard(s, actions){
+  const dia = new Date(s.date+'T12:00:00').toLocaleDateString('es-ES',{weekday:'long', day:'numeric', month:'long'});
+  const pill = whenLabel(s);
+  const enCurso = s.started!==false && !s.closed;
+  return `<section class="hero"><div class="k"><span>${enCurso?'Quedada en curso':'Próxima quedada'}</span>${pill?`<span class="pill">${pill}</span>`:''}</div>
+    <div class="hora">${esc(s.start_time)}</div><div class="dia">${dia}</div>
+    <div class="sitio">${ICONS.pin}<span>${s.place?esc(s.place):'Sitio sin indicar'}</span></div>
+    <div class="acts">${actions||''}${s.place?`<a class="alt" href="${mapUrl(s.place)}" target="_blank" rel="noopener">Cómo llegar</a>`:''}</div></section>`;
+}
 const val = id => (document.getElementById(id)||{}).value;
 
 function toast(t){ const el=document.getElementById('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(toast._t); toast._t=setTimeout(()=>el.classList.remove('on'),2400); }
@@ -168,7 +197,7 @@ async function boot(){
 let authMode = 'login';
 function chrome(showNav){
   document.querySelector('nav').style.display = showNav ? 'flex' : 'none';
-  document.getElementById('sub').textContent = me && me.status==='approved' ? `${me.full_name}${isAdmin()?' · súper usuario':''}` : 'Lista y reparto';
+  document.getElementById('sub').textContent = me && me.status==='approved' ? `Hola, ${(me.full_name||'').split(' ')[0]}${isAdmin()?' · súper usuario':''}` : 'Lista y reparto';
 }
 function renderAuth(){
   chrome(false);
@@ -207,12 +236,12 @@ function render(){
   const nav = document.querySelector('nav');
   const pend = D.profiles.filter(p=>p.status==='pending').length;
   nav.innerHTML = isAdmin() ? `
-    <button data-tab="hoy"><span>📋</span>Hoy</button>
-    <button data-tab="coro"><span>👥${pend?`<i class="badge">${pend}</i>`:''}</span>Coro</button>
-    <button data-tab="historial"><span>📒</span>Historial</button>
-    <button data-tab="yo"><span>🙋</span>Lo mío</button>
-    <button data-tab="ajustes"><span>⚙️</span>Ajustes</button>`
-    : `<button data-tab="yo"><span>🙋</span>Mis asistencias</button>`;
+    <button data-tab="hoy"><span>${ICONS.hoy}</span>Hoy</button>
+    <button data-tab="coro"><span>${ICONS.coro}${pend?`<i class="badge">${pend}</i>`:''}</span>Coro</button>
+    <button data-tab="historial"><span>${ICONS.historial}</span>Historial</button>
+    <button data-tab="yo"><span>${ICONS.yo}</span>Lo mío</button>
+    <button data-tab="ajustes"><span>${ICONS.ajustes}</span>Ajustes</button>`
+    : `<button data-tab="yo"><span>${ICONS.yo}</span>Mis asistencias</button>`;
   nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab===tab));
   const os = openSession();
   if(isAdmin() && os) document.getElementById('sub').textContent = `Quedada abierta · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
@@ -239,16 +268,17 @@ function renderHoy(){
     const n = D.members.filter(m=>m.active!==false).length;
     const pl = plannedSessions();
     $.innerHTML = `
-      ${pl.length?`<div class="card"><h2>📅 Próximas quedadas</h2>
-        ${pl.map(p=>`<div class="list-item" style="align-items:flex-start"><span><b>${fmtDate(p.date)} · ${esc(p.start_time)}</b><br><span class="det">${placeHtml(p)}</span></span>
-          <span class="row" style="flex:0;gap:6px"><button class="ic" data-act="editPlanned" data-id="${p.id}">✎</button><button class="ic g" data-act="startPlanned" data-id="${p.id}" ${n?'':'disabled'}>▶️ Pasar lista</button></span></div>`).join('')}
+      ${pl.length?heroCard(pl[0], `<button data-act="startPlanned" data-id="${pl[0].id}" ${n?'':'disabled'}>Pasar lista</button><button class="alt" data-act="editPlanned" data-id="${pl[0].id}">Editar</button>`):''}
+      ${pl.length>1?`<div class="card"><h2>Más adelante</h2>
+        ${pl.slice(1).map(p=>`<div class="list-item" style="align-items:flex-start"><span><b>${fmtDate(p.date)} · ${esc(p.start_time)}</b><br><span class="det">${placeHtml(p)}</span></span>
+          <span class="row" style="flex:0;gap:6px"><button class="ic" data-act="editPlanned" data-id="${p.id}" aria-label="Editar">✎</button><button class="ic g" data-act="startPlanned" data-id="${p.id}" ${n?'':'disabled'}>Pasar lista</button></span></div>`).join('')}
       </div>`:''}
       <div class="card"><h2>Nueva quedada</h2>
         <label>Fecha</label><input type="date" id="nsDate" value="${today()}">
         <label>Hora de quedada</label><input type="time" id="nsStart" value="${esc(S().start)}">
         <label>Sitio (punto exacto de encuentro)</label><input id="nsPlace" placeholder="p. ej. Puerta de la parroquia de San Pablo" autocomplete="off" value="${esc(S().place||'')}">
-        <button class="btn" data-act="planSession">📣 Programar y avisar a todos</button>
-        <button class="btn sec" data-act="startSession" ${n?'':'disabled style="opacity:.5"'}>▶️ Empezar ya a pasar lista (sin avisar)</button>
+        <button class="btn" data-act="planSession">Programar y avisar a todos</button>
+        <button class="btn sec" data-act="startSession" ${n?'':'disabled style="opacity:.5"'}>Empezar ya a pasar lista (sin avisar)</button>
         <p class="hint">Al programarla, a todos les llega un aviso con día, hora y sitio, y otro recordatorio 1 hora antes.</p>
         ${n?'':'<p class="hint">Primero apunta a la gente en la pestaña <b>Coro</b>.</p>'}
         <p class="hint">Margen de cortesía: <b>${S().tolerance} min</b> · Reparto: <b>${S().mode==='tramos'?'por tramos':'proporcional al tiempo'}</b> · Redondeo: <b>${eur(S().step)}</b></p>
@@ -343,7 +373,7 @@ function renderHistorial(){
   const sum = f => closed.reduce((a,s)=>a+(s[f]||0),0);
   const boteSaldo = D.bote.reduce((a,b)=>a+b.amount_cents,0);
   document.getElementById('app').innerHTML = `
-    <div class="card"><h2>💰 Bote común</h2><div class="big">${eur(boteSaldo)}</div>
+    <div class="card"><h2>Bote común</h2><div class="big">${eur(boteSaldo)}</div>
       <p class="hint">Se llena con lo que sobra al redondear. Úsalo para gastos o añade aportaciones.</p>
       <div class="row"><button class="btn sm sec" data-act="boteAsk" data-v="-1">− Pagar un gasto</button><button class="btn sm sec" data-act="boteAsk" data-v="1">＋ Añadir dinero</button></div>
       ${D.bote.length?`<details style="margin-top:10px"><summary class="muted">Movimientos (${D.bote.length})</summary>${D.bote.slice(0,60).map(b=>`<div class="list-item"><span>${esc(b.note||'')}<br><span class="muted">${new Date(b.created_at).toLocaleDateString('es-ES')}</span></span><span style="color:${b.amount_cents<0?'var(--bad)':'var(--ok)'};font-weight:700;white-space:nowrap">${b.amount_cents>0?'+':''}${eur(b.amount_cents)}</span>${b.session_id?'':`<button class="ic r" style="flex:0;margin-left:6px" data-act="boteDel" data-id="${b.id}">✕</button>`}</div>`).join('')}</details>`:''}
@@ -373,9 +403,9 @@ function renderYo(){
     let hoy = '';
     if(open){ const a = attGet(open.id, mid); hoy = `<div class="card" style="border:2px solid var(--oro)"><b>Quedada en curso · ${fmtDate(open.date)} ${esc(open.start_time)}</b><div class="det" style="margin-top:6px">${statusInfo(open,a).txt}</div></div>`; }
     body = `${hoy}
-      <div class="card"><h2>${esc(m?m.name:me.full_name)}</h2>
-        <div class="muted">Total ganado hasta ahora</div><div class="big" style="font-size:34px">${eur(total)}</div>
-        <div class="stats"><div class="stat"><b>${dias}</b><small>días</small></div><div class="stat"><b>${(mins/60).toFixed(1)}</b><small>horas</small></div><div class="stat"><b>${dias?eur(Math.round(total/dias)):'–'}</b><small>media/día</small></div></div>
+      <div class="tiles">
+        <div class="tile"><div class="l">Llevas ganado</div><div class="v g">${eur(total)}</div></div>
+        <div class="tile"><div class="l">Asistencia</div><div class="v">${dias} día${dias===1?'':'s'} · ${String(Math.round(mins/6)/10).replace('.',',')} h</div></div>
       </div>
       <div class="card"><h2>Mis asistencias</h2>
         ${mine.length ? `<table><tr><th>Día</th><th>Tiempo</th><th class="n">Ganado</th></tr>${mine.map(({a,s})=>{
@@ -387,7 +417,7 @@ function renderYo(){
   }
   const bote = D.bote.reduce((a,b)=>a+b.amount_cents,0);
   document.getElementById('app').innerHTML = upcomingCard() + body + pushCard() + `
-    <div class="card"><div class="row"><span class="muted">💰 Bote común del coro</span><b style="text-align:right">${eur(bote)}</b></div></div>
+    <div class="card"><div class="row"><span class="muted">Bote común del coro</span><b style="text-align:right;color:var(--oro)">${eur(bote)}</b></div></div>
     <div class="card"><h2>Mi cuenta</h2><p class="muted" style="margin-top:-4px">@${esc(me.username)}</p>
       <label>Cambiar mi contraseña</label><div class="row"><input id="myPass" type="password" autocomplete="new-password" placeholder="nueva contraseña"><button class="btn sm sec" style="flex:0" data-act="myPass">Cambiar</button></div>
       <button class="btn danger" data-act="logout">Cerrar sesión</button></div>
@@ -788,13 +818,13 @@ function pushCard(){
   if(pushOn) inner = `<p class="muted" style="margin-top:0">✅ Activados en este móvil. Te avisaremos de las quedadas, del recordatorio 1 h antes y de lo que ganas.</p>${isAdmin()?'<button class="btn sm sec" data-act="testPush">Enviarme un aviso de prueba</button>':''}`;
   else if(st==='ios') inner = `<p class="muted" style="margin-top:0">Para recibir avisos en iPhone, primero instala la app: botón <b>Compartir</b> → <b>Añadir a pantalla de inicio</b>. Luego ábrela desde el icono y pulsa aquí.</p>`;
   else if(st==='no') inner = `<p class="muted" style="margin-top:0">Este navegador no admite avisos. Prueba con Chrome (Android) o instalando la app (iPhone).</p>`;
-  else inner = `<p class="muted" style="margin-top:0">Recibe avisos de nuevas quedadas, cambios de hora o sitio, el recordatorio 1 h antes y lo que te toca en cada reparto.</p><button class="btn" data-act="enablePush">🔔 Activar avisos en este móvil</button>`;
-  return `<div class="card"><h2>🔔 Avisos</h2>${inner}</div>`;
+  else inner = `<p class="muted" style="margin-top:0">Recibe avisos de nuevas quedadas, cambios de hora o sitio, el recordatorio 1 h antes y lo que te toca en cada reparto.</p><button class="btn" data-act="enablePush">Activar avisos en este móvil</button>`;
+  return `<div class="card"><h2>Avisos</h2>${inner}</div>`;
 }
 function upcomingCard(){
   const up = D.sessions.filter(s=>!s.closed).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
   if(!up.length) return '';
-  return `<div class="card" style="border:2px solid var(--oro)"><h2>📅 Próximas quedadas</h2>${up.map(s=>`<div class="list-item"><span><b>${fmtDate(s.date)} · ${esc(s.start_time)}</b>${s.started!==false?' <span class="tag ok">en curso</span>':''}<br><span class="det">${placeHtml(s)}</span></span></div>`).join('')}</div>`;
+  return heroCard(up[0]) + (up.length>1 ? `<div class="card"><h2>Más adelante</h2>${up.slice(1).map(s=>`<div class="list-item"><span><b>${fmtDate(s.date)} · ${esc(s.start_time)}</b><br><span class="det">${placeHtml(s)}</span></span></div>`).join('')}</div>` : '');
 }
 
 /* ---------- aviso por correo (EmailJS) ---------- */
