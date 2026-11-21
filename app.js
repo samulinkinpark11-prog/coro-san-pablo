@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.7';
+const VERSION = 'v4.8';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -11,6 +11,7 @@ const DEF_SETTINGS = {
 let sb = null, authUser = null, me = null;           // me = perfil
 let D = { members:[], sessions:[], att:[], profiles:[], bote:[], settings:{...DEF_SETTINGS}, lastBackup:null };
 let tab = 'hoy', loading = true, booting = false;
+let pendingLink = location.hash || '';   // enlace desde una notificación (#cal=<id>, #yo, #coro)
 
 /* ---------- utilidades ---------- */
 const pad = n => String(n).padStart(2,'0');
@@ -213,7 +214,7 @@ async function boot(){
     tab = isAdmin() ? (['hoy','cal','coro','historial','sup','yo','ajustes'].includes(tab)?tab:'hoy') : isSup() ? (['cal','sup','yo'].includes(tab)?tab:'sup') : (['cal','yo'].includes(tab)?tab:'yo');
     loading = true; render();
     await loadAll(); await checkPush(); loading = false;
-    subscribe(); render();
+    subscribe(); render(); applyDeepLink();
     const np = D.profiles.filter(p=>p.status==='pending').length;
     if(isAdmin() && np) toast(`🔔 Tienes ${np} solicitud${np>1?'es':''} de acceso pendiente${np>1?'s':''} (pestaña Coro)`);
   } catch(e){ renderMsg('Sin conexión', 'No se ha podido conectar. Comprueba la cobertura y vuelve a intentarlo.'); }
@@ -363,6 +364,21 @@ function renderHoy(){
     ${isEnded(s)
       ? `<button class="btn oro" data-act="closeAsk">Introducir botín y repartir</button><button class="btn sec" data-act="resumeSession">Reanudar la quedada (no ha terminado)</button>`
       : `<button class="btn oro" data-act="endAsk">Terminar quedada</button><p class="hint" style="text-align:center">El botín se introduce después, cuando esté contado.</p>`}`;
+}
+
+/* ----- ENLACES DESDE NOTIFICACIONES ----- */
+function applyDeepLink(){
+  const h = pendingLink; if(!h || !me || me.status!=='approved') return;
+  pendingLink = '';
+  try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){}
+  sheet(''); focusId = null;
+  if(h.startsWith('#cal')){
+    const id = h.split('=')[1]; const s = id && D.sessions.find(x => x.id === id);
+    tab = 'cal';
+    if(s){ calSel = s.date; calMonth = s.date.slice(0,7); }
+  } else if(h === '#yo') tab = 'yo';
+  else if(h === '#coro' && isAdmin()) tab = 'coro';
+  render(); const app = document.getElementById('app'); if(app) app.scrollTop = 0;
 }
 
 /* ----- CALENDARIO ----- */
@@ -1182,6 +1198,8 @@ function init(){
   });
   document.addEventListener('visibilitychange', () => { if(document.visibilityState==='visible' && me && me.status==='approved') scheduleReload(); });
   setInterval(()=>{ if(isAdmin() && tab==='hoy' && openSession() && !document.getElementById('sheet').innerHTML && !document.activeElement?.matches('input,select,textarea')) render(); }, 30000);
+  if('serviceWorker' in navigator){ navigator.serviceWorker.addEventListener('message', ev => { if(ev.data && ev.data.deepLink!==undefined){ pendingLink = ev.data.deepLink || '#cal'; if(!loading) applyDeepLink(); } }); }
+  window.addEventListener('hashchange', () => { if(location.hash){ pendingLink = location.hash; if(!loading) applyDeepLink(); } });
   if('serviceWorker' in navigator && location.protocol==='https:'){ navigator.serviceWorker.register('sw.js', {updateViaCache:'none'}).then(r=>r.update()).catch(()=>{}); }
   if(!CFG.SUPABASE_URL || !CFG.SUPABASE_KEY || !window.supabase){ renderSetup(); return; }
   sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_KEY, { auth:{ persistSession:true, autoRefreshToken:true } });
