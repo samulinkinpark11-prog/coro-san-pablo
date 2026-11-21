@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.5';
+const VERSION = 'v4.6';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -366,6 +366,19 @@ function renderHoy(){
 }
 
 /* ----- CALENDARIO ----- */
+function jmjBanner(){
+  const start = new Date(2027, 7, 3), end = new Date(2027, 7, 8, 23, 59);
+  const now = new Date(); const dias = Math.ceil((start - new Date(now.toDateString()))/86400000);
+  const falta = now > end ? '¡Ya hemos estado!' : dias > 0 ? `Faltan <b>${dias}</b> día${dias===1?'':'s'}` : '¡Ya estamos en Seúl!';
+  return `<section class="jmj">
+    <img class="jmj-logo" src="jmj-seul-2027.png" alt="Logo de la JMJ Seúl 2027" onerror="this.remove()">
+    <div class="jmj-txt">
+      <div class="jmj-k">JMJ Seúl 2027</div>
+      <div class="jmj-t">Vamos camino a Seúl</div>
+      <div class="jmj-d">3 – 8 de agosto de 2027 · ${falta}</div>
+    </div>
+  </section>`;
+}
 let calMonth = null, calSel = null;
 function sessionState(s){
   if(s.closed) return {t:'Hecha', c:''};
@@ -434,7 +447,7 @@ function renderCal(){
       </div>
     </div>`; }).join('')
     : `<div class="card"><p class="muted" style="margin:0">No hay quedada este día.</p>${isAdmin() && calSel>=t ? `<button class="btn sec" data-act="calPlan" data-d="${calSel}">Programar una quedada este día</button>` : ''}</div>`;
-  document.getElementById('app').innerHTML = `
+  document.getElementById('app').innerHTML = jmjBanner() + `
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <button class="ic" style="flex:0" data-act="calMove" data-v="-1" aria-label="Mes anterior">‹</button>
