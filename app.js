@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.1';
+const VERSION = 'v4.2';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -25,7 +25,10 @@ const toCents = v => { let s = String(v||'').replace(/\s|€/g,''); if(s.include
 const fmtDate = d => { try{ return new Date(d+'T12:00:00').toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'}); }catch(e){ return d; } };
 const minTxt = m => m >= 60 ? Math.floor(m/60)+' h'+(m%60? ' '+(m%60)+' min':'') : m+' min';
 const member = id => D.members.find(m => m.id === id);
-const openSession = () => D.sessions.find(s => !s.closed && s.started !== false);
+let focusId = null;   // quedada terminada que se está revisando o repartiendo
+const activeSession = () => D.sessions.find(s => !s.closed && s.started !== false && !s.end_time);
+const pendingSessions = () => D.sessions.filter(s => !s.closed && s.started !== false && s.end_time).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
+const openSession = () => (focusId && D.sessions.find(s => s.id === focusId && !s.closed)) || activeSession();
 const isEnded = s => !!(s && !s.closed && s.started !== false && s.end_time);   // terminada, pendiente de repartir
 const plannedSessions = () => D.sessions.filter(s => !s.closed && s.started === false).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
 const mapUrl = p => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p + ', Sevilla');
@@ -245,8 +248,8 @@ function render(){
     <button data-tab="ajustes"><span>${ICONS.ajustes}</span>Ajustes</button>`
     : `<button data-tab="yo"><span>${ICONS.yo}</span>Mis asistencias</button>`;
   nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab===tab));
-  const os = openSession();
-  if(isAdmin() && os) document.getElementById('sub').textContent = `${isEnded(os)?'Pendiente de reparto':'Quedada abierta'} · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
+  const os = activeSession();
+  if(isAdmin() && os) document.getElementById('sub').textContent = `Quedada en curso · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
   if(loading){ document.getElementById('app').innerHTML = '<div class="empty">Cargando…</div>'; return; }
   const views = {hoy:renderHoy, coro:renderCoro, historial:renderHistorial, yo:renderYo, ajustes:renderAjustes};
   (isAdmin() ? (views[tab]||renderHoy) : renderYo)();
@@ -263,13 +266,22 @@ function statusInfo(s, a){
 }
 
 /* ----- HOY ----- */
+function pendingCard(){
+  const pend = pendingSessions(); if(!pend.length) return '';
+  return `<div class="card" style="border-color:var(--oro)"><h2>Pendientes de reparto (${pend.length})</h2>
+    <p class="hint" style="margin-top:-4px">Quedadas terminadas a la espera de contar su bolsa.</p>
+    ${pend.map(p=>{ const n = attOf(p.id).filter(a=>a.status==='present').length;
+      return `<div class="list-item"><span><b>${fmtDate(p.date)} · ${esc(p.start_time)}–${esc(p.end_time)}</b><br><span class="det">${n} presente${n===1?'':'s'}${p.place?' · '+esc(p.place):''}</span></span>
+      <span class="row" style="flex:0;gap:6px"><button class="ic" data-act="focusSession" data-id="${p.id}">Ver</button><button class="ic g" data-act="repartir" data-id="${p.id}">Repartir</button></span></div>`; }).join('')}
+  </div>`;
+}
 function renderHoy(){
   const $ = document.getElementById('app');
   const s = openSession();
   if(!s){
     const n = D.members.filter(m=>m.active!==false).length;
     const pl = plannedSessions();
-    $.innerHTML = `
+    $.innerHTML = pendingCard() + `
       ${pl.length?heroCard(pl[0], `<button data-act="startPlanned" data-id="${pl[0].id}" ${n?'':'disabled'}>Pasar lista</button><button class="alt" data-act="editPlanned" data-id="${pl[0].id}">Editar</button>`):''}
       ${pl.length>1?`<div class="card"><h2>Más adelante</h2>
         ${pl.slice(1).map(p=>`<div class="list-item" style="align-items:flex-start"><span><b>${fmtDate(p.date)} · ${esc(p.start_time)}</b><br><span class="det">${placeHtml(p)}</span></span>
@@ -305,6 +317,7 @@ function renderHoy(){
     + (done.length ? `<h3 ${pend.length?'':'style="margin-top:0"'}>✅ Ya marcados (${done.length})</h3>${done.map(rowHtml).join('')}` : '');
   $.innerHTML = `
     <div class="card">
+      ${focusId?`<button class="btn sec sm" data-act="unfocus" style="margin-bottom:12px">← Volver</button>`:''}
       ${isEnded(s)?`<div style="background:rgba(242,193,78,.14);color:var(--oro);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-weight:600">Quedada terminada a las ${esc(s.end_time)} · pendiente de contar el botín y repartir</div>`:''}
       <div class="row" style="align-items:flex-start"><div><h2 style="margin:0">${fmtDate(s.date)}</h2><div class="muted">Quedada a las <b>${esc(s.start_time)}</b> · ${isEnded(s)?`terminó a las <b>${esc(s.end_time)}</b>`:`ahora ${nowHM()}`}</div><div class="det" style="margin-top:4px">${placeHtml(s)}</div></div>
       <button class="ic" style="flex:0" data-act="editSession">✎</button></div>
@@ -377,7 +390,7 @@ function renderHistorial(){
   const totRows = Object.values(tot).sort((a,b)=>b.cents-a.cents);
   const sum = f => closed.reduce((a,s)=>a+(s[f]||0),0);
   const boteSaldo = D.bote.reduce((a,b)=>a+b.amount_cents,0);
-  document.getElementById('app').innerHTML = `
+  document.getElementById('app').innerHTML = pendingCard() + `
     <div class="card"><h2>Bote común</h2><div class="big">${eur(boteSaldo)}</div>
       <p class="hint">Se llena con lo que sobra al redondear. Úsalo para gastos o añade aportaciones.</p>
       <div class="row"><button class="btn sm sec" data-act="boteAsk" data-v="-1">− Pagar un gasto</button><button class="btn sm sec" data-act="boteAsk" data-v="1">＋ Añadir dinero</button></div>
@@ -616,7 +629,7 @@ const A = {
   async myPass(){ const p = val('myPass')||''; if(p.length<6) return toast('Mínimo 6 caracteres'); try{ await q(sb.auth.updateUser({password:p})); toast('Contraseña cambiada'); document.getElementById('myPass').value=''; }catch(e){} },
 
   async startSession(el){
-    if(openSession()) return;
+    if(activeSession()) return;
     busy(el,true);
     try{
       const s = await q(sb.from('sessions').insert({date:val('nsDate')||today(), start_time:val('nsStart')||S().start, place:(val('nsPlace')||'').trim()||null, started:true}).select().single());
@@ -635,7 +648,7 @@ const A = {
     }catch(e){ busy(el,false); }
   },
   async startPlanned(el){
-    if(openSession()) return toast('Ya hay una quedada abierta');
+    if(activeSession()) return toast('Ya hay una quedada en curso');
     const s = D.sessions.find(x=>x.id===el.dataset.id); if(!s) return;
     busy(el,true);
     try{ await q(sb.from('sessions').update({started:true}).eq('id', s.id)); await fillAttendance(s.id); await loadAll(); render(); }
@@ -696,6 +709,9 @@ const A = {
     }catch(e){}
   },
   closeAsk(){ closeSheet(); },
+  focusSession(el){ focusId = el.dataset.id; tab='hoy'; sheet(''); render(); document.getElementById('app').scrollTop=0; },
+  repartir(el){ focusId = el.dataset.id; tab='hoy'; sheet(''); render(); closeSheet(); },
+  unfocus(){ focusId = null; render(); },
   endAsk(){
     const s=openSession(); const pend = attOf(s.id).filter(a=>a.status==='pending').length;
     sheet(`<h2>Terminar quedada</h2>
@@ -708,12 +724,13 @@ const A = {
   async endSession(el){
     const s=openSession(); const end = val('eEnd') || nowHM();
     busy(el,true);
-    try{ await q(sb.from('sessions').update({end_time:end}).eq('id', s.id)); s.end_time = end; sheet(''); render(); toast('Quedada terminada a las '+end); }
+    try{ await q(sb.from('sessions').update({end_time:end}).eq('id', s.id)); s.end_time = end; focusId = null; sheet(''); render(); toast('Quedada terminada a las '+end+'. Queda pendiente de reparto.'); }
     catch(e){ busy(el,false); }
   },
   async resumeSession(){
-    const s=openSession(); if(!confirm('¿Reanudar la quedada? Se borrará la hora de fin.')) return;
-    try{ await q(sb.from('sessions').update({end_time:null}).eq('id', s.id)); s.end_time = null; render(); }catch(e){}
+    const s=openSession(); const act=activeSession(); if(act && act.id!==s.id) return toast('Ya hay otra quedada en curso');
+    if(!confirm('¿Reanudar la quedada? Se borrará la hora de fin.')) return;
+    try{ await q(sb.from('sessions').update({end_time:null}).eq('id', s.id)); s.end_time = null; focusId = null; render(); }catch(e){}
   },
   async confirmClose(el){
     const s=openSession(); const end=val('cEnd')||nowHM(); const botin=toCents(val('cBotin')); const gastos=toCents(val('cGastos'));
@@ -730,7 +747,7 @@ const A = {
       await q(sb.from('sessions').update({closed:true, end_time:end, botin_cents:botin, gastos_cents:gastos, repartido_cents:r.repartido, sobrante_cents:r.sobrante,
         duration_min:r.dur, mode:S().mode, tolerance:S().tolerance, step_cents:S().step}).eq('id', s.id));
       await loadAll(); await backup();
-      tab='historial'; render(); viewSession(s.id); toast('Quedada guardada y copia hecha ✅');
+      focusId = null; tab='historial'; render(); viewSession(s.id); toast('Quedada guardada y copia hecha ✅');
       notify({type:'payout', session_id:s.id});
     }catch(e){ busy(el,false); }
   },
@@ -741,14 +758,13 @@ const A = {
     try{ await navigator.clipboard.writeText(t); toast('Copiado. Pégalo en WhatsApp'); }catch(e){ location.href='https://wa.me/?text='+encodeURIComponent(t); }
   },
   async reopen(el){
-    if(openSession()) return alert('Ya hay una quedada abierta. Ciérrala primero.');
     if(!confirm('¿Reabrir esta quedada para corregirla? Se quitará su reparto hasta que la vuelvas a cerrar.')) return;
     const id = el.dataset.id; sheet('');
     try{
       await q(sb.from('bote').delete().eq('session_id', id));
       await q(sb.from('sessions').update({closed:false, repartido_cents:0, sobrante_cents:0}).eq('id', id));
       await q(sb.from('attendance').update({amount_cents:0, weight:0}).eq('session_id', id));
-      await loadAll(); tab='hoy'; render();
+      focusId = id; await loadAll(); tab='hoy'; render();
     }catch(e){}
   },
   async delSession(el){ if(!confirm('¿Borrar esta quedada del historial? Se borrarán también sus asistencias.')) return; sheet('');
@@ -764,12 +780,12 @@ const A = {
   async addMember(){ const i=document.getElementById('newName'); const n=i.value.trim(); if(!n) return;
     if(D.members.some(m=>m.name.toLowerCase()===n.toLowerCase()) && !confirm('Ya hay alguien con ese nombre. ¿Añadir igualmente?')) return;
     try{ const m = await q(sb.from('members').insert({name:n}).select().single()); D.members.push(m);
-      const s=openSession(); if(s) await setAtt(s.id, m.id, {status:'pending'});
+      const s=activeSession(); if(s) await setAtt(s.id, m.id, {status:'pending'});
       render(); const ni=document.getElementById('newName'); if(ni) ni.focus(); }catch(e){} },
   bulkAsk(){ sheet(`<h2>Pegar lista</h2><textarea id="bulk" rows="10" style="width:100%;font-size:16px;padding:10px;border-radius:10px;border:1px solid var(--line)" placeholder="María López&#10;José García&#10;Lucía Pérez"></textarea><button class="btn" data-act="bulkAdd">Añadir todos</button>`); },
   async bulkAdd(){ const names=[...new Set(val('bulk').split(/\n|,/).map(x=>x.trim()).filter(Boolean))].filter(n=>!D.members.some(m=>m.name.toLowerCase()===n.toLowerCase())); sheet('');
     if(!names.length) return toast('No hay nombres nuevos');
-    try{ const ms = await q(sb.from('members').insert(names.map(name=>({name}))).select()); const s=openSession();
+    try{ const ms = await q(sb.from('members').insert(names.map(name=>({name}))).select()); const s=activeSession();
       if(s) await q(sb.from('attendance').insert(ms.map(m=>({session_id:s.id, member_id:m.id, status:'pending'}))));
       await loadAll(); render(); toast(ms.length+' añadidos'); }catch(e){} },
   async rename(el){ const m=member(el.dataset.id); const n=prompt('Nuevo nombre', m.name); if(!n||!n.trim()) return; m.name=n.trim(); render();
@@ -785,7 +801,7 @@ const A = {
     sheet('');
     try{
       if(mid === '__new'){ const m = await q(sb.from('members').insert({name:p.full_name}).select().single()); mid = m.id;
-        const s=openSession(); if(s) await q(sb.from('attendance').insert({session_id:s.id, member_id:m.id, status:'pending'})); }
+        const s=activeSession(); if(s) await q(sb.from('attendance').insert({session_id:s.id, member_id:m.id, status:'pending'})); }
       const upd = st==='approved' ? {status:st, member_id:mid, is_admin: p.id===me.id ? true : adm} : {status:st, is_admin:false};
       await q(sb.from('profiles').update(upd).eq('id', p.id));
       await loadAll(); render(); toast(st==='approved' ? 'Guardado ✅' : 'Acceso retirado');
@@ -848,7 +864,9 @@ function pushCard(){
 function upcomingCard(){
   const up = D.sessions.filter(s=>!s.closed && !isEnded(s)).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
   const ended = D.sessions.filter(isEnded);
-  const pendCard = ended.map(s=>`<div class="card"><div class="row" style="align-items:flex-start"><div><b>Quedada del ${fmtDate(s.date)} terminada</b><div class="muted" style="margin-top:4px">Se está contando el botín. Cuando se reparta te llegará un aviso con lo tuyo.</div></div></div></div>`).join('');
+  const pendCard = ended.length ? `<div class="card"><b>${ended.length===1?'1 quedada pendiente de reparto':ended.length+' quedadas pendientes de reparto'}</b>
+    <div class="muted" style="margin-top:4px">${ended.map(s=>`${fmtDate(s.date)} ${esc(s.start_time)}`).join(' · ')}</div>
+    <div class="hint">Cuando se cuente cada bolsa te llegará un aviso con lo tuyo.</div></div>` : '';
   if(!up.length) return pendCard;
   return pendCard + heroCard(up[0]) + (up.length>1 ? `<div class="card"><h2>Más adelante</h2>${up.slice(1).map(s=>`<div class="list-item"><span><b>${fmtDate(s.date)} · ${esc(s.start_time)}</b><br><span class="det">${placeHtml(s)}</span></span></div>`).join('')}</div>` : '');
 }
@@ -866,7 +884,7 @@ function notifyAdmin(full_name, username){
 /* ---------- inicio ---------- */
 function init(){
   document.addEventListener('click', e => {
-    const n = e.target.closest('nav button'); if(n){ tab=n.dataset.tab; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
+    const n = e.target.closest('nav button'); if(n){ tab=n.dataset.tab; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     const el = e.target.closest('[data-act]'); if(!el) return;
     if(el.tagName==='A') e.preventDefault();
     if(el.dataset.act==='closeSheet' && e.target!==el) return;
