@@ -158,6 +158,24 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.rsvp_counts() to authenticated;
 
+-- Registrar este móvil para avisos (si antes estaba a nombre de otro usuario, pasa a este)
+create or replace function public.claim_push(p_endpoint text, p_p256dh text, p_auth text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not public.is_approved() then raise exception 'No autorizado'; end if;
+  delete from push_subscriptions where endpoint = p_endpoint and user_id <> auth.uid();
+  insert into push_subscriptions (endpoint, user_id, p256dh, auth) values (p_endpoint, auth.uid(), p_p256dh, p_auth)
+  on conflict (endpoint) do update set p256dh = excluded.p256dh, auth = excluded.auth, user_id = excluded.user_id;
+end $$;
+grant execute on function public.claim_push(text, text, text) to authenticated;
+
+-- Cuántos móviles con avisos tiene cada usuario (solo para súper usuarios)
+create or replace function public.push_counts() returns table(user_id uuid, n bigint)
+language sql stable security definer set search_path = public as $$
+  select s.user_id, count(*) from push_subscriptions s where public.is_admin() group by s.user_id;
+$$;
+grant execute on function public.push_counts() to authenticated;
+
 -- Un súper usuario puede poner contraseña nueva a quien la olvide
 create or replace function public.admin_set_password(uid uuid, new_password text) returns void
 language plpgsql security definer set search_path = public, extensions as $$

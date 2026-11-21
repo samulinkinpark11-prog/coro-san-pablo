@@ -165,11 +165,13 @@ Deno.serve(async (req) => {
       }) });
     }
 
+    if (type === 'test') {
+      if (me.status !== 'approved') return json({ error: 'no autorizado' }, 403);
+      return json({ ok: true, sent: await push([me.id], { title: '✅ Avisos funcionando', body: 'Así te llegarán las notificaciones del coro.', tag: 'prueba' }) });
+    }
+
     if (!(me.is_admin && me.status === 'approved')) return json({ error: 'solo súper usuarios' }, 403);
 
-    if (type === 'test') {
-      return json({ ok: true, sent: await push([me.id], { title: '✅ Avisos activados', body: 'Así te llegarán las notificaciones del coro.', tag: 'prueba' }) });
-    }
 
     if (type === 'announcement') {
       const { data: an } = await db.from('announcements').select('*').eq('id', body.announcement_id).single();

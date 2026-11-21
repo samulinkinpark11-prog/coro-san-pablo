@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.9';
+const VERSION = 'v4.10';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -157,6 +157,7 @@ async function loadAll(){
       q(sb.from('backups').select('id,created_at').order('id',{ascending:false}).limit(1), true).catch(()=>[])
     ]);
     Object.assign(D, {members, sessions, att, profiles, bote});
+    D.pushN = {}; try{ const { data } = await sb.rpc('push_counts'); (data||[]).forEach(r => D.pushN[r.user_id] = Number(r.n)); }catch(e){}
     await Promise.all([loadAlarms(), loadRsvp(), loadAnn()]);
     D.lastBackup = bk && bk[0] ? bk[0].created_at : null;
   } else {
@@ -636,7 +637,7 @@ function renderCoro(){
       ${act.length ? act.map(li).join('') : '<div class="empty">Todavía no hay nadie apuntado.</div>'}
     </div>
     <div class="card"><h2>Usuarios con acceso (${appr.length})</h2>
-      ${appr.map(p=>{ const m = member(p.member_id); return `<div class="list-item" data-act="userSheet" data-id="${p.id}"><span><b>${esc(p.full_name)}</b> ${p.is_admin?'<span class="tag late">⭐ súper</span>':''}${p.is_supervisor&&!p.is_admin?'<span class="tag left">supervisión</span>':''}<br><span class="muted">@${esc(p.username)} · ${p.is_supervisor&&!p.is_admin?'solo consulta':m?'🔗 '+esc(m.name):'<span style="color:var(--bad)">sin asociar</span>'}</span></span><span class="muted">›</span></div>`; }).join('') || '<div class="empty">Nadie todavía.</div>'}
+      ${appr.map(p=>{ const m = member(p.member_id); return `<div class="list-item" data-act="userSheet" data-id="${p.id}"><span><b>${esc(p.full_name)}</b> ${p.is_admin?'<span class="tag late">⭐ súper</span>':''}${p.is_supervisor&&!p.is_admin?'<span class="tag left">supervisión</span>':''}${D.pushN?(D.pushN[p.id]?' <span class="tag ok">🔔 avisos</span>':' <span class="tag abs">sin avisos</span>'):''}<br><span class="muted">@${esc(p.username)} · ${p.is_supervisor&&!p.is_admin?'solo consulta':m?'🔗 '+esc(m.name):'<span style="color:var(--bad)">sin asociar</span>'}</span></span><span class="muted">›</span></div>`; }).join('') || '<div class="empty">Nadie todavía.</div>'}
     </div>
     ${ina.length?`<div class="card"><h3 style="margin-top:0">Ya no vienen</h3>${ina.map(li).join('')}<p class="hint">Se conservan para que el historial siga cuadrando.</p></div>`:''}
     ${rej.length?`<div class="card"><h3 style="margin-top:0">Sin acceso / rechazados</h3>${rej.map(p=>`<div class="list-item" data-act="userSheet" data-id="${p.id}"><span>${esc(p.full_name)} <span class="muted">@${esc(p.username)}</span></span><span class="muted">›</span></div>`).join('')}</div>`:''}`;
@@ -928,10 +929,11 @@ const A = {
       if(perm !== 'granted'){ toast('No has dado permiso. Actívalo en Ajustes del móvil → Notificaciones'); return; }
       const reg = await navigator.serviceWorker.ready;
       let sub = await reg.pushManager.getSubscription();
+      if(sub && el.dataset.fresh){ try{ const old = sub.toJSON().endpoint; await sub.unsubscribe(); await sb.from('push_subscriptions').delete().eq('endpoint', old); }catch(e){} sub = null; }
       if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: b64ToBytes(CFG.VAPID_PUBLIC_KEY) });
-      const j = sub.toJSON();
-      await q(sb.from('push_subscriptions').upsert({ endpoint:j.endpoint, user_id:authUser.id, p256dh:j.keys.p256dh, auth:j.keys.auth }));
-      pushOn = true; render(); toast('🔔 Avisos activados en este móvil');
+      await savePush(sub);
+      pushOn = true; pushErr = ''; render(); toast('🔔 Avisos activados en este móvil');
+      if(el.dataset.fresh) setTimeout(()=>notify({type:'test'}), 800);
     }catch(e){ console.warn(e); toast('⚠️ No se pudieron activar los avisos'); }
     finally{ busy(el,false); }
   },
@@ -1185,15 +1187,30 @@ function pushSupport(){
 }
 function b64ToBytes(b64){ const p='='.repeat((4-b64.length%4)%4); const s=atob((b64+p).replace(/-/g,'+').replace(/_/g,'/')); return Uint8Array.from([...s].map(c=>c.charCodeAt(0))); }
 async function currentSub(){ try{ if(!('serviceWorker' in navigator)) return null; const reg = await navigator.serviceWorker.getRegistration(); return reg && reg.pushManager ? await reg.pushManager.getSubscription() : null; }catch(e){ return null; } }
+let pushErr = '';
+async function savePush(sub){
+  const j = sub.toJSON();
+  const r = await sb.rpc('claim_push', { p_endpoint:j.endpoint, p_p256dh:j.keys.p256dh, p_auth:j.keys.auth });
+  if(r.error){   // por si aún no se ha ejecutado el SQL nuevo
+    const r2 = await sb.from('push_subscriptions').upsert({ endpoint:j.endpoint, user_id:authUser.id, p256dh:j.keys.p256dh, auth:j.keys.auth });
+    if(r2.error) throw r2.error;
+  }
+}
 async function checkPush(){
-  pushOn = false;
-  try{ if(pushSupport()==='ok' && Notification.permission==='granted'){ const sub = await currentSub(); if(sub){ pushOn = true;
-    const j = sub.toJSON(); sb.from('push_subscriptions').upsert({ endpoint:j.endpoint, user_id:authUser.id, p256dh:j.keys.p256dh, auth:j.keys.auth }).then(()=>{}); } } }catch(e){}
+  pushOn = false; pushErr = '';
+  try{
+    if(pushSupport()!=='ok' || Notification.permission!=='granted') return;
+    const sub = await currentSub(); if(!sub) return;
+    pushOn = true;
+    try{ await savePush(sub); }catch(e){ pushErr = 'Este móvil no está bien registrado en el servidor. Pulsa «Reactivar avisos».'; }
+  }catch(e){}
 }
 function pushCard(){
   const st = pushSupport();
   let inner;
-  if(pushOn) inner = `<p class="muted" style="margin-top:0">✅ Activados en este móvil. Te avisaremos de las quedadas, del recordatorio 1 h antes y de lo que ganas.</p>${isAdmin()?'<button class="btn sm sec" data-act="testPush">Enviarme un aviso de prueba</button>':''}`;
+  if(pushOn) inner = `${pushErr?`<p style="margin-top:0;color:var(--warn)">⚠️ ${pushErr}</p>`:`<p class="muted" style="margin-top:0">✅ Activados en este móvil. Te avisaremos de las quedadas, del recordatorio 1 h antes y de lo que ganas.</p>`}
+    <div class="row" style="gap:8px"><button class="btn sm sec" data-act="testPush">Probar en este móvil</button><button class="btn sm sec" data-act="enablePush" data-fresh="1">Reactivar avisos</button></div>
+    <p class="hint">¿No te llega la prueba? Pulsa «Reactivar avisos». Si sigue sin llegar, revisa en el móvil Ajustes → Notificaciones → Coro, y que no tengas activado «No molestar» o un modo Concentración.</p>`;
   else if(st==='ios') inner = `<p class="muted" style="margin-top:0">Para recibir avisos en iPhone, primero instala la app: botón <b>Compartir</b> → <b>Añadir a pantalla de inicio</b>. Luego ábrela desde el icono y pulsa aquí.</p>`;
   else if(st==='no') inner = `<p class="muted" style="margin-top:0">Este navegador no admite avisos. Prueba con Chrome (Android) o instalando la app (iPhone).</p>`;
   else inner = `<p class="muted" style="margin-top:0">Recibe avisos de nuevas quedadas, cambios de hora o sitio, el recordatorio 1 h antes y lo que te toca en cada reparto.</p><button class="btn" data-act="enablePush">Activar avisos en este móvil</button>`;
