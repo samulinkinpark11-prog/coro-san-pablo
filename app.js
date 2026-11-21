@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.3';
+const VERSION = 'v4.4';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -83,6 +83,7 @@ function heroCard(s, actions){
   return `<section class="hero"><div class="k"><span>${enCurso?'Quedada en curso':'Próxima quedada'}</span>${pill?`<span class="pill">${pill}</span>`:''}</div>
     <div class="hora">${esc(s.start_time)}</div><div class="dia">${dia}</div>
     <div class="sitio">${ICONS.pin}<span>${s.place?esc(s.place):'Sitio sin indicar'}</span></div>
+    ${rsvpLine(s)?`<div style="margin-top:8px;font-size:14px;font-weight:600">${rsvpLine(s)}</div>`:''}
     <div class="acts">${actions||''}${s.place?`<a class="alt" href="${mapUrl(s.place)}" target="_blank" rel="noopener">Cómo llegar</a>`:''}</div></section>`;
 }
 const val = id => (document.getElementById(id)||{}).value;
@@ -152,7 +153,7 @@ async function loadAll(){
       q(sb.from('backups').select('id,created_at').order('id',{ascending:false}).limit(1), true).catch(()=>[])
     ]);
     Object.assign(D, {members, sessions, att, profiles, bote});
-    await loadAlarms();
+    await Promise.all([loadAlarms(), loadRsvp()]);
     D.lastBackup = bk && bk[0] ? bk[0].created_at : null;
   } else {
     const [members, sessions, att, bote] = await Promise.all([
@@ -162,8 +163,18 @@ async function loadAll(){
       q(sb.from('bote').select('amount_cents'))
     ]);
     Object.assign(D, {members, sessions, att, bote, profiles:[]});
-    await loadAlarms();
+    await Promise.all([loadAlarms(), loadRsvp()]);
   }
+}
+async function loadRsvp(){
+  D.rsvp = []; D.rsvpCount = {};
+  try{ const { data } = await sb.from('session_rsvp').select('*'); if(data) D.rsvp = data; }catch(e){}
+  try{ const { data } = await sb.rpc('rsvp_counts'); (data||[]).forEach(r => D.rsvpCount[r.session_id] = {yes:Number(r.yes_count)||0, no:Number(r.no_count)||0}); }catch(e){}
+}
+const myRsvp = sid => (D.rsvp||[]).find(r => r.session_id===sid && r.user_id===authUser.id);
+function rsvpLine(s){
+  const c = (D.rsvpCount||{})[s.id]; if(!c || (!c.yes && !c.no)) return '';
+  return `${c.yes} va${c.yes===1?'':'n'} · ${c.no} no puede${c.no===1?'':'n'}`;
 }
 async function loadAlarms(){
   D.alarms = new Set();
@@ -181,7 +192,7 @@ let channel = null;
 function subscribe(){
   if(channel) return;
   channel = sb.channel('coro-cambios');
-  ['attendance','sessions','members','profiles'].forEach(t => channel.on('postgres_changes', {event:'*', schema:'public', table:t}, scheduleReload));
+  ['attendance','sessions','members','profiles','session_rsvp'].forEach(t => channel.on('postgres_changes', {event:'*', schema:'public', table:t}, scheduleReload));
   channel.subscribe();
 }
 
@@ -354,6 +365,28 @@ function sessionState(s){
   if(s.end_time) return {t:'Pendiente de reparto', c:'late'};
   return {t:'En curso', c:'left'};
 }
+function rsvpBlock(s){
+  const mine = myRsvp(s.id), c = (D.rsvpCount||{})[s.id] || {yes:0,no:0};
+  let who = '';
+  if(isAdmin()){
+    const name = uid => { const p = D.profiles.find(x=>x.id===uid); const m = p && member(p.member_id); return m ? m.name : (p ? p.full_name : '?'); };
+    const yes = D.rsvp.filter(r=>r.session_id===s.id && r.status==='yes').map(r=>name(r.user_id)).sort((x,y)=>x.localeCompare(y,'es'));
+    const no = D.rsvp.filter(r=>r.session_id===s.id && r.status==='no').map(r=>name(r.user_id)).sort((x,y)=>x.localeCompare(y,'es'));
+    const answered = new Set(D.rsvp.filter(r=>r.session_id===s.id).map(r=>r.user_id));
+    const sin = D.profiles.filter(p=>p.status==='approved' && !answered.has(p.id)).map(p=>name(p.id)).sort((x,y)=>x.localeCompare(y,'es'));
+    const sinApp = D.members.filter(m=>m.active!==false && !D.profiles.some(p=>p.status==='approved' && p.member_id===m.id)).length;
+    who = `<details style="margin-top:8px"><summary>Ver quién</summary>
+      <p class="muted" style="margin:8px 0 4px"><b style="color:var(--ok)">Van (${yes.length}):</b> ${yes.length?esc(yes.join(', ')):'nadie aún'}</p>
+      <p class="muted" style="margin:4px 0"><b style="color:var(--bad)">No pueden (${no.length}):</b> ${no.length?esc(no.join(', ')):'nadie'}</p>
+      <p class="muted" style="margin:4px 0"><b>Sin responder (${sin.length}):</b> ${sin.length?esc(sin.join(', ')):'nadie'}</p>
+      ${sinApp?`<p class="hint">${sinApp} persona${sinApp>1?'s':''} de la lista aún no usa${sinApp>1?'n':''} la app.</p>`:''}
+    </details>`;
+  }
+  return `<div style="margin-top:14px">
+    <div class="muted" style="font-size:13px;margin-bottom:6px">¿Vas a venir?${c.yes||c.no?` · <b style="color:var(--txt)">${c.yes}</b> van, <b style="color:var(--txt)">${c.no}</b> no pueden`:''}</div>
+    <div class="seg"><button class="${mine&&mine.status==='yes'?'on':''}" data-act="rsvp" data-id="${s.id}" data-v="yes">Voy</button><button class="${mine&&mine.status==='no'?'on':''}" data-act="rsvp" data-id="${s.id}" data-v="no">No puedo</button></div>
+    ${who}</div>`;
+}
 function renderCal(){
   const byDay = {};
   D.sessions.forEach(s => { (byDay[s.date] = byDay[s.date] || []).push(s); });
@@ -385,6 +418,7 @@ function renderCal(){
       <div class="row" style="align-items:center"><div class="big" style="font-size:34px;flex:0 0 auto">${esc(s.start_time)}</div><span style="text-align:right"><span class="tag ${st.c}">${st.t}</span></span></div>
       <div class="sitio" style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;line-height:1.35">${ICONS.pin}<span>${s.place?esc(s.place):'<span class="muted">Sitio sin indicar</span>'}</span></div>
       ${s.closed && mine ? `<p class="muted" style="margin:10px 0 0">Tu parte: <b style="color:var(--oro)">${eur(mine.amount_cents)}</b></p>` : ''}
+      ${future ? rsvpBlock(s) : ''}
       ${future ? `<button class="btn ${on?'sec':''}" data-act="toggleAlarm" data-id="${s.id}">${ICONS.bell} ${on?'Te avisaremos por la mañana · quitar':'Recordármelo por la mañana'}</button>` : ''}
       <div class="row" style="margin-top:10px;gap:8px">
         ${s.place?`<a class="btn sec sm" style="flex:1" href="${mapUrl(s.place)}" target="_blank" rel="noopener">Cómo llegar</a>`:''}
@@ -652,6 +686,21 @@ async function backup(){
 const A = {
   closeSheet: () => sheet(''),
   calDay(el){ calSel = el.dataset.d; render(); },
+  async rsvp(el){
+    const sid = el.dataset.id, v = el.dataset.v, prev = myRsvp(sid);
+    const c = D.rsvpCount[sid] = D.rsvpCount[sid] || {yes:0,no:0};
+    try{
+      if(prev && prev.status===v){
+        await q(sb.from('session_rsvp').delete().eq('session_id',sid).eq('user_id',authUser.id));
+        D.rsvp = D.rsvp.filter(r=>r!==prev); c[v]--;
+      } else {
+        await q(sb.from('session_rsvp').upsert({session_id:sid, user_id:authUser.id, status:v, updated_at:new Date().toISOString()}));
+        if(prev){ c[prev.status]--; prev.status=v; } else D.rsvp.push({session_id:sid, user_id:authUser.id, status:v});
+        c[v]++; toast(v==='yes' ? '¡Apuntado! Gracias' : 'Anotado que no puedes');
+      }
+      render();
+    }catch(e){}
+  },
   calMove(el){ const [y,m] = calMonth.split('-').map(Number); const d = new Date(y, m-1+Number(el.dataset.v), 1); calMonth = d.getFullYear()+'-'+pad(d.getMonth()+1); render(); },
   calEdit(el){ sessionSheet(D.sessions.find(x=>x.id===el.dataset.id)); },
   calPlan(el){ tab='hoy'; focusId=null; render(); const i=document.getElementById('nsDate'); if(i){ i.value = el.dataset.d; document.getElementById('nsPlace')?.focus(); } },

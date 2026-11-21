@@ -101,6 +101,15 @@ create table if not exists public.session_alarms (
   primary key (user_id, session_id)
 );
 
+-- ---------- v4.4: «Voy / No puedo» en cada quedada ----------
+create table if not exists public.session_rsvp (
+  session_id uuid not null references public.sessions(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  status text not null check (status in ('yes','no')),
+  updated_at timestamptz default now(),
+  primary key (session_id, user_id)
+);
+
 -- ---------- FUNCIONES AUXILIARES ----------
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -122,6 +131,14 @@ language sql stable security definer set search_path = public as $$
   select not exists (select 1 from profiles where lower(username) = lower(u));
 $$;
 grant execute on function public.username_available(text) to anon, authenticated;
+
+-- Recuento de «Voy / No puedo» por quedada (todos los aceptados lo ven, sin nombres)
+create or replace function public.rsvp_counts() returns table(session_id uuid, yes_count bigint, no_count bigint)
+language sql stable security definer set search_path = public as $$
+  select r.session_id, count(*) filter (where r.status = 'yes'), count(*) filter (where r.status = 'no')
+  from session_rsvp r where public.is_approved() group by r.session_id;
+$$;
+grant execute on function public.rsvp_counts() to authenticated;
 
 -- Un súper usuario puede poner contraseña nueva a quien la olvide
 create or replace function public.admin_set_password(uid uuid, new_password text) returns void
@@ -163,10 +180,11 @@ alter table public.bote       enable row level security;
 alter table public.backups    enable row level security;
 alter table public.push_subscriptions enable row level security;
 alter table public.session_alarms enable row level security;
+alter table public.session_rsvp enable row level security;
 
 do $$ declare r record; begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public'
-           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions','session_alarms') loop
+           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions','session_alarms','session_rsvp') loop
     execute format('drop policy %I on public.%I', r.policyname, r.tablename);
   end loop;
 end $$;
@@ -201,6 +219,8 @@ create policy bote_read  on public.bote for select using (public.is_approved());
 create policy bote_admin on public.bote for all using (public.is_admin()) with check (public.is_admin());
 
 -- Avisos al móvil: cada uno gestiona sus propios dispositivos
+create policy rsvp_own on public.session_rsvp for all using (user_id = auth.uid()) with check (user_id = auth.uid() and public.is_approved());
+create policy rsvp_admin on public.session_rsvp for select using (public.is_admin());
 create policy alarms_own on public.session_alarms for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy push_own on public.push_subscriptions for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
@@ -213,6 +233,7 @@ do $$ begin
   begin alter publication supabase_realtime add table public.sessions;   exception when others then null; end;
   begin alter publication supabase_realtime add table public.members;    exception when others then null; end;
   begin alter publication supabase_realtime add table public.profiles;   exception when others then null; end;
+  begin alter publication supabase_realtime add table public.session_rsvp; exception when others then null; end;
 end $$;
 
 -- ---------- PERMISOS DE ACCESO A TABLAS Y PERFILES QUE FALTEN ----------
