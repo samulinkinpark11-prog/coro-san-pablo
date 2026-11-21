@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v3.3';
+const VERSION = 'v3.4';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
