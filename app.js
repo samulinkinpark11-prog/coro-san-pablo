@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.4';
+const VERSION = 'v4.5';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -50,6 +50,8 @@ async function notify(body, quiet){
 const attOf = sid => D.att.filter(a => a.session_id === sid);
 const attGet = (sid, mid) => D.att.find(a => a.session_id === sid && a.member_id === mid);
 const isAdmin = () => !!(me && me.is_admin && me.status === 'approved');
+const isSup = () => !!(me && me.is_supervisor && !me.is_admin && me.status === 'approved');   // responsables: solo ver
+const canSee = () => isAdmin() || isSup();
 const sortName = (a,b) => (a.name||'').localeCompare(b.name||'', 'es');
 const userEmail = u => `${u.toLowerCase()}@${CFG.EMAIL_DOMAIN || 'corosanpablo.app'}`;
 const S = () => D.settings;
@@ -57,6 +59,7 @@ const IC = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const ICONS = {
   hoy: IC('<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>'),
   cal: IC('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>'),
+  sup: IC('<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>'),
   bell: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
   coro: IC('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>'),
   historial: IC('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>'),
@@ -160,7 +163,7 @@ async function loadAll(){
       q(sb.from('members').select('*')),
       q(sb.from('sessions').select('*')),
       q(sb.from('attendance').select('*')),
-      q(sb.from('bote').select('amount_cents'))
+      q(isSup() ? sb.from('bote').select('*').order('created_at',{ascending:false}) : sb.from('bote').select('amount_cents'))
     ]);
     Object.assign(D, {members, sessions, att, bote, profiles:[]});
     await Promise.all([loadAlarms(), loadRsvp()]);
@@ -207,7 +210,7 @@ async function boot(){
     if(!me){ renderMsg('No se encontró tu perfil', 'Vuelve a intentarlo en un momento.' + (meErr ? `<br><small>Detalle: ${esc(meErr)}</small>` : '')); return; }
     if(me.status === 'pending'){ renderMsg('⏳ Solicitud pendiente', `Hola ${esc(me.full_name)}. Un responsable del coro tiene que aceptar tu registro. Vuelve a entrar más tarde.`); return; }
     if(me.status === 'rejected'){ renderMsg('Acceso no autorizado', 'Tu solicitud no ha sido aceptada. Habla con un responsable del coro.'); return; }
-    tab = isAdmin() ? (['hoy','cal','coro','historial','yo','ajustes'].includes(tab)?tab:'hoy') : (['cal','yo'].includes(tab)?tab:'yo');
+    tab = isAdmin() ? (['hoy','cal','coro','historial','sup','yo','ajustes'].includes(tab)?tab:'hoy') : isSup() ? (['cal','sup','yo'].includes(tab)?tab:'sup') : (['cal','yo'].includes(tab)?tab:'yo');
     loading = true; render();
     await loadAll(); await checkPush(); loading = false;
     subscribe(); render();
@@ -221,7 +224,7 @@ async function boot(){
 let authMode = 'login';
 function chrome(showNav){
   document.querySelector('nav').style.display = showNav ? 'flex' : 'none';
-  document.getElementById('sub').textContent = me && me.status==='approved' ? `Hola, ${(me.full_name||'').split(' ')[0]}${isAdmin()?' · súper usuario':''}` : 'Lista y reparto';
+  document.getElementById('sub').textContent = me && me.status==='approved' ? `Hola, ${(me.full_name||'').split(' ')[0]}${isAdmin()?' · súper usuario':isSup()?' · supervisión':''}` : 'Lista y reparto';
 }
 function renderAuth(){
   chrome(false);
@@ -264,15 +267,20 @@ function render(){
     <button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>
     <button data-tab="coro"><span>${ICONS.coro}${pend?`<i class="badge">${pend}</i>`:''}</span>Coro</button>
     <button data-tab="historial"><span>${ICONS.historial}</span>Historial</button>
-    <button data-tab="yo"><span>${ICONS.yo}</span>Lo mío</button>
-    <button data-tab="ajustes"><span>${ICONS.ajustes}</span>Ajustes</button>`
+    <button data-tab="sup"><span>${ICONS.sup}</span>Supervisión</button>
+    <button data-tab="yo"><span>${ICONS.yo}</span>Lo mío</button>`
+    : isSup() ? `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button><button data-tab="sup"><span>${ICONS.sup}</span>Supervisión</button><button data-tab="yo"><span>${ICONS.yo}</span>Mi cuenta</button>`
     : `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button><button data-tab="yo"><span>${ICONS.yo}</span>Mis asistencias</button>`;
   nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab===tab));
   const os = activeSession();
   if(isAdmin() && os) document.getElementById('sub').textContent = `Quedada en curso · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
   if(loading){ document.getElementById('app').innerHTML = '<div class="empty">Cargando…</div>'; return; }
-  const views = {hoy:renderHoy, cal:renderCal, coro:renderCoro, historial:renderHistorial, yo:renderYo, ajustes:renderAjustes};
-  (isAdmin() ? (views[tab]||renderHoy) : (tab==='cal' ? renderCal : renderYo))();
+  const views = {hoy:renderHoy, cal:renderCal, coro:renderCoro, historial:renderHistorial, sup:renderSup, yo:renderYo, ajustes:renderAjustes};
+  document.getElementById('gear').style.display = isAdmin() ? 'flex' : 'none';
+  document.getElementById('gear').classList.toggle('on', tab==='ajustes');
+  if(isAdmin()) (views[tab]||renderHoy)();
+  else if(isSup()) ({cal:renderCal, sup:renderSup, yo:renderYo}[tab]||renderSup)();
+  else (tab==='cal' ? renderCal : renderYo)();
 }
 
 function statusInfo(s, a){
@@ -373,7 +381,7 @@ function rsvpBlock(s){
     const yes = D.rsvp.filter(r=>r.session_id===s.id && r.status==='yes').map(r=>name(r.user_id)).sort((x,y)=>x.localeCompare(y,'es'));
     const no = D.rsvp.filter(r=>r.session_id===s.id && r.status==='no').map(r=>name(r.user_id)).sort((x,y)=>x.localeCompare(y,'es'));
     const answered = new Set(D.rsvp.filter(r=>r.session_id===s.id).map(r=>r.user_id));
-    const sin = D.profiles.filter(p=>p.status==='approved' && !answered.has(p.id)).map(p=>name(p.id)).sort((x,y)=>x.localeCompare(y,'es'));
+    const sin = D.profiles.filter(p=>p.status==='approved' && !(p.is_supervisor && !p.is_admin) && !answered.has(p.id)).map(p=>name(p.id)).sort((x,y)=>x.localeCompare(y,'es'));
     const sinApp = D.members.filter(m=>m.active!==false && !D.profiles.some(p=>p.status==='approved' && p.member_id===m.id)).length;
     who = `<details style="margin-top:8px"><summary>Ver quién</summary>
       <p class="muted" style="margin:8px 0 4px"><b style="color:var(--ok)">Van (${yes.length}):</b> ${yes.length?esc(yes.join(', ')):'nadie aún'}</p>
@@ -418,7 +426,7 @@ function renderCal(){
       <div class="row" style="align-items:center"><div class="big" style="font-size:34px;flex:0 0 auto">${esc(s.start_time)}</div><span style="text-align:right"><span class="tag ${st.c}">${st.t}</span></span></div>
       <div class="sitio" style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;line-height:1.35">${ICONS.pin}<span>${s.place?esc(s.place):'<span class="muted">Sitio sin indicar</span>'}</span></div>
       ${s.closed && mine ? `<p class="muted" style="margin:10px 0 0">Tu parte: <b style="color:var(--oro)">${eur(mine.amount_cents)}</b></p>` : ''}
-      ${future ? rsvpBlock(s) : ''}
+      ${future && !isSup() ? rsvpBlock(s) : ''}
       ${future ? `<button class="btn ${on?'sec':''}" data-act="toggleAlarm" data-id="${s.id}">${ICONS.bell} ${on?'Te avisaremos por la mañana · quitar':'Recordármelo por la mañana'}</button>` : ''}
       <div class="row" style="margin-top:10px;gap:8px">
         ${s.place?`<a class="btn sec sm" style="flex:1" href="${mapUrl(s.place)}" target="_blank" rel="noopener">Cómo llegar</a>`:''}
@@ -437,6 +445,62 @@ function renderCal(){
     </div>
     <h3 style="margin:6px 4px 8px;text-transform:none;letter-spacing:0;font-size:16px;color:var(--txt)">${selTitle.charAt(0).toUpperCase()+selTitle.slice(1)}</h3>
     ${detail}`;
+}
+
+/* ----- SUPERVISIÓN ----- */
+function reasonOf(a){
+  if(!a) return {t:'No estaba en la lista', c:'abs'};
+  if(a.status==='absent' || a.status==='pending' || !(a.present_min>0)) return {t:'No vino', c:'abs'};
+  const p = []; if(a.late_min) p.push(`Llegó ${a.late_min} min tarde`); if(a.early_min) p.push(`se fue ${a.early_min} min antes`);
+  return p.length ? {t: p.join(' y ').replace(/^se/,'Se'), c:'late'} : {t:'Toda la quedada', c:'ok'};
+}
+function memberStats(mid){
+  const closed = D.sessions.filter(s=>s.closed).sort((x,y)=>(y.date+y.start_time).localeCompare(x.date+x.start_time));
+  const rows = closed.map(s => ({s, a: attGet(s.id, mid)}));
+  const att = rows.filter(r=>r.a && r.a.present_min>0);
+  return { rows, total: rows.reduce((t,r)=>t+(r.a?r.a.amount_cents:0),0), dias: att.length, quedadas: closed.length,
+    mins: att.reduce((t,r)=>t+r.a.present_min,0), tarde: att.filter(r=>r.a.late_min>0).length, minTarde: att.reduce((t,r)=>t+(r.a.late_min||0),0),
+    antes: att.filter(r=>r.a.early_min>0).length, faltas: rows.length - att.length };
+}
+function renderSup(){
+  const closed = D.sessions.filter(s=>s.closed).sort((x,y)=>(y.date+y.start_time).localeCompare(x.date+x.start_time));
+  const sum = f => closed.reduce((t,s)=>t+(s[f]||0),0);
+  const bote = D.bote.reduce((t,b)=>t+b.amount_cents,0);
+  const people = D.members.map(m => ({m, st: memberStats(m.id)})).filter(x => x.m.active!==false || x.st.total>0)
+    .sort((x,y)=> y.st.total-x.st.total || x.m.name.localeCompare(y.m.name,'es'));
+  document.getElementById('app').innerHTML = `
+    <div class="tiles">
+      <div class="tile"><div class="l">Recaudado</div><div class="v g">${eur(sum('botin_cents'))}</div></div>
+      <div class="tile"><div class="l">Repartido</div><div class="v">${eur(sum('repartido_cents'))}</div></div>
+      <div class="tile"><div class="l">Gastos</div><div class="v">${eur(sum('gastos_cents'))}</div></div>
+      <div class="tile"><div class="l">Bote común</div><div class="v">${eur(bote)}</div></div>
+    </div>
+    <div class="card"><h2>Por persona</h2>
+      <p class="hint" style="margin-top:-4px">${closed.length} quedada${closed.length===1?'':'s'} repartida${closed.length===1?'':'s'}. Toca un nombre para ver el detalle.</p>
+      ${people.length ? people.map(({m,st}) => `<div class="list-item" data-act="memberSheet" data-id="${m.id}" style="cursor:pointer"><span><b>${esc(m.name)}</b>${m.active===false?' <span class="tag">ya no viene</span>':''}<br><span class="det" style="font-size:13px">${st.dias}/${st.quedadas} días${st.tarde?` · ${st.tarde} tarde`:''}${st.antes?` · ${st.antes} se fue antes`:''}</span></span><span style="display:flex;align-items:center;gap:8px"><b style="color:var(--oro)">${eur(st.total)}</b><span class="muted">›</span></span></div>`).join('') : '<div class="empty">Aún no hay nadie en la lista.</div>'}
+    </div>
+    <div class="card"><h2>Por día</h2>
+      ${closed.length ? closed.map(s => `<div class="list-item" data-act="supSession" data-id="${s.id}" style="cursor:pointer"><span><b>${fmtDate(s.date)} · ${esc(s.start_time)}–${esc(s.end_time)}</b><br><span class="det" style="font-size:13px">${attOf(s.id).filter(a=>a.present_min>0).length} presentes${s.gastos_cents?` · gastos ${eur(s.gastos_cents)}`:''}</span></span><span style="display:flex;align-items:center;gap:8px"><b>${eur(s.botin_cents)}</b><span class="muted">›</span></span></div>`).join('') : '<div class="empty">Aún no hay quedadas repartidas.</div>'}
+    </div>`;
+}
+function memberSheet(mid){
+  const m = member(mid); if(!m) return; const st = memberStats(mid);
+  const pct = st.quedadas ? Math.round(st.dias*100/st.quedadas) : 0;
+  sheet(`<h2>${esc(m.name)}</h2>
+    <div class="tiles">
+      <div class="tile"><div class="l">Total ganado</div><div class="v g">${eur(st.total)}</div></div>
+      <div class="tile"><div class="l">Asistencia</div><div class="v">${st.dias}/${st.quedadas} · ${pct}%</div></div>
+    </div>
+    <div class="sumbox">
+      <div><span>Horas cantando</span><b>${String(Math.round(st.mins/6)/10).replace('.',',')} h</b></div>
+      <div><span>Media por día</span><b>${st.dias?eur(Math.round(st.total/st.dias)):'–'}</b></div>
+      <div><span>Veces tarde</span><b>${st.tarde}${st.minTarde?` (${st.minTarde} min)`:''}</b></div>
+      <div><span>Se fue antes / faltas</span><b>${st.antes} / ${st.faltas}</b></div>
+    </div>
+    <h3>Día a día</h3>
+    ${st.rows.length ? `<table><tr><th>Día</th><th>Motivo</th><th class="n">%</th><th class="n">Cobra</th></tr>${st.rows.map(({s,a}) => { const r = reasonOf(a);
+      return `<tr><td><b>${fmtDate(s.date)}</b><br><span class="muted" style="font-size:12px">${esc(s.start_time)}–${esc(s.end_time)}</span></td><td><span class="tag ${r.c}" style="margin-left:0">${r.t}</span>${a&&a.present_min>0?`<br><span class="muted" style="font-size:12px">${minTxt(a.present_min)} cantando</span>`:''}</td><td class="n">${a?Math.round(Number(a.weight)*100):0}%</td><td class="n"><b>${eur(a?a.amount_cents:0)}</b></td></tr>`; }).join('')}</table>` : '<div class="empty">Aún no hay quedadas repartidas.</div>'}
+    <button class="btn sec" data-act="closeSheet">Cerrar</button>`);
 }
 
 /* ----- CORO (gente + usuarios) ----- */
@@ -460,7 +524,7 @@ function renderCoro(){
       ${act.length ? act.map(li).join('') : '<div class="empty">Todavía no hay nadie apuntado.</div>'}
     </div>
     <div class="card"><h2>Usuarios con acceso (${appr.length})</h2>
-      ${appr.map(p=>{ const m = member(p.member_id); return `<div class="list-item" data-act="userSheet" data-id="${p.id}"><span><b>${esc(p.full_name)}</b> ${p.is_admin?'<span class="tag late">⭐ súper</span>':''}<br><span class="muted">@${esc(p.username)} · ${m?'🔗 '+esc(m.name):'<span style="color:var(--bad)">sin asociar</span>'}</span></span><span class="muted">›</span></div>`; }).join('') || '<div class="empty">Nadie todavía.</div>'}
+      ${appr.map(p=>{ const m = member(p.member_id); return `<div class="list-item" data-act="userSheet" data-id="${p.id}"><span><b>${esc(p.full_name)}</b> ${p.is_admin?'<span class="tag late">⭐ súper</span>':''}${p.is_supervisor&&!p.is_admin?'<span class="tag left">supervisión</span>':''}<br><span class="muted">@${esc(p.username)} · ${p.is_supervisor&&!p.is_admin?'solo consulta':m?'🔗 '+esc(m.name):'<span style="color:var(--bad)">sin asociar</span>'}</span></span><span class="muted">›</span></div>`; }).join('') || '<div class="empty">Nadie todavía.</div>'}
     </div>
     ${ina.length?`<div class="card"><h3 style="margin-top:0">Ya no vienen</h3>${ina.map(li).join('')}<p class="hint">Se conservan para que el historial siga cuadrando.</p></div>`:''}
     ${rej.length?`<div class="card"><h3 style="margin-top:0">Sin acceso / rechazados</h3>${rej.map(p=>`<div class="list-item" data-act="userSheet" data-id="${p.id}"><span>${esc(p.full_name)} <span class="muted">@${esc(p.username)}</span></span><span class="muted">›</span></div>`).join('')}</div>`:''}`;
@@ -475,7 +539,8 @@ function userSheet(id){
   sheet(`<h2>${esc(p.full_name)}</h2><p class="muted" style="margin-top:-6px">@${esc(p.username)} · ${p.status==='pending'?'⏳ pendiente':p.status==='approved'?'✅ aceptado':'⛔ sin acceso'}</p>
     <label>Asociar a su nombre de la lista del coro</label>
     <select id="uMember"><option value="">— Sin asociar —</option><option value="__new">＋ Crear «${esc(p.full_name)}» en la lista</option>${opts}</select>
-    <label class="check"><input type="checkbox" id="uAdmin" ${p.is_admin?'checked':''} ${self?'disabled':''}> <span>⭐ Súper usuario<br><small class="muted">Puede pasar lista y gestionarlo todo</small></span></label>
+    <label class="check"><input type="checkbox" id="uAdmin" ${p.is_admin?'checked':''} ${self?'disabled':''} onchange="if(this.checked){var o=document.getElementById('uSup');if(o)o.checked=false}"> <span>⭐ Súper usuario<br><small class="muted">Puede pasar lista y gestionarlo todo</small></span></label>
+    <label class="check"><input type="checkbox" id="uSup" ${p.is_supervisor&&!p.is_admin?'checked':''} ${self?'disabled':''} onchange="if(this.checked){var o=document.getElementById('uAdmin');if(o)o.checked=false}"> <span>Solo supervisión<br><small class="muted">Responsables de la parroquia: ven la agenda y los números, sin poder modificar nada. No necesitan nombre en la lista.</small></span></label>
     ${p.status!=='approved'
       ? `<button class="btn" data-act="userSave" data-id="${id}" data-st="approved">✅ Aceptar</button>${p.status==='pending'?`<button class="btn danger" data-act="userSave" data-id="${id}" data-st="rejected">Rechazar</button>`:''}`
       : `<button class="btn" data-act="userSave" data-id="${id}" data-st="approved">Guardar</button>
@@ -511,7 +576,9 @@ function renderHistorial(){
 function renderYo(){
   const mid = me.member_id; const m = member(mid);
   let body = '';
-  if(!mid){
+  if(isSup()){
+    body = `<div class="card"><h2>Mi cuenta de supervisión</h2><p class="muted" style="margin:0">Puedes consultar el calendario y la página de Supervisión. No puedes modificar nada.</p></div>`;
+  } else if(!mid){
     body = `<div class="card"><h2>Mis asistencias</h2><p class="muted">Tu usuario todavía no está asociado a tu nombre de la lista del coro. Cuando un responsable lo asocie, aquí verás tus asistencias y lo que llevas ganado.</p></div>`;
   } else {
     const mine = D.att.filter(a => a.member_id === mid).map(a => ({a, s: D.sessions.find(x=>x.id===a.session_id)})).filter(x=>x.s && x.s.closed)
@@ -685,6 +752,9 @@ async function backup(){
 
 const A = {
   closeSheet: () => sheet(''),
+  memberSheet(el){ memberSheet(el.dataset.id); },
+  supSession(el){ const s = D.sessions.find(x=>x.id===el.dataset.id); if(!s) return;
+    sheet(`<h2>${fmtDate(s.date)} · ${esc(s.start_time)}–${esc(s.end_time)}</h2>${s.place?`<p class="muted" style="margin-top:-6px">${esc(s.place)}</p>`:''}${resultTable(storedResult(s))}<button class="btn sec" data-act="closeSheet">Cerrar</button>`); },
   calDay(el){ calSel = el.dataset.d; render(); },
   async rsvp(el){
     const sid = el.dataset.id, v = el.dataset.v, prev = myRsvp(sid);
@@ -758,7 +828,7 @@ const A = {
       await boot();
     }catch(e){} finally{ busy(el,false); }
   },
-  async logout(){ try{ const sub = await currentSub(); if(sub) await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint); }catch(e){} try{ await sb.auth.signOut(); }catch(e){} if(channel){ try{ sb.removeChannel(channel); }catch(e){} channel=null; } me=null; authUser=null; authMode='login'; renderAuth(); },
+  async logout(){ try{ const sub = await currentSub(); if(sub) await sb.from('push_subscriptions').delete().eq('endpoint', sub.endpoint); }catch(e){} try{ await sb.auth.signOut(); }catch(e){} if(channel){ try{ sb.removeChannel(channel); }catch(e){} channel=null; } me=null; authUser=null; authMode='login'; tab='hoy'; focusId=null; renderAuth(); },
   async myPass(){ const p = val('myPass')||''; if(p.length<6) return toast('Mínimo 6 caracteres'); try{ await q(sb.auth.updateUser({password:p})); toast('Contraseña cambiada'); document.getElementById('myPass').value=''; }catch(e){} },
 
   async startSession(el){
@@ -929,13 +999,13 @@ const A = {
   userSheet(el){ userSheet(el.dataset.id); },
   async userSave(el){
     const p = D.profiles.find(x=>x.id===el.dataset.id); const st = el.dataset.st;
-    let mid = val('uMember') || null; const adm = document.getElementById('uAdmin')?.checked || false;
+    let mid = val('uMember') || null; const adm = document.getElementById('uAdmin')?.checked || false; const sup = !adm && (document.getElementById('uSup')?.checked || false);
     if(st==='rejected' && !confirm(`¿Quitar el acceso a ${p.full_name}?`)) return;
     sheet('');
     try{
       if(mid === '__new'){ const m = await q(sb.from('members').insert({name:p.full_name}).select().single()); mid = m.id;
         const s=activeSession(); if(s) await q(sb.from('attendance').insert({session_id:s.id, member_id:m.id, status:'pending'})); }
-      const upd = st==='approved' ? {status:st, member_id:mid, is_admin: p.id===me.id ? true : adm} : {status:st, is_admin:false};
+      const upd = st==='approved' ? {status:st, member_id: sup ? null : mid, is_admin: p.id===me.id ? true : adm, is_supervisor: p.id===me.id ? false : sup} : {status:st, is_admin:false, is_supervisor:false};
       await q(sb.from('profiles').update(upd).eq('id', p.id));
       await loadAll(); render(); toast(st==='approved' ? 'Guardado ✅' : 'Acceso retirado');
     }catch(e){}
@@ -1018,6 +1088,7 @@ function notifyAdmin(full_name, username){
 /* ---------- inicio ---------- */
 function init(){
   document.addEventListener('click', e => {
+    if(e.target.closest('#gear')){ tab='ajustes'; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     const n = e.target.closest('nav button'); if(n){ tab=n.dataset.tab; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     const el = e.target.closest('[data-act]'); if(!el) return;
     if(el.tagName==='A') e.preventDefault();

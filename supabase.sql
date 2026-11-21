@@ -110,6 +110,9 @@ create table if not exists public.session_rsvp (
   primary key (session_id, user_id)
 );
 
+-- ---------- v4.5: responsables de la parroquia (solo supervisión, sin modificar nada) ----------
+alter table public.profiles add column if not exists is_supervisor boolean not null default false;
+
 -- ---------- FUNCIONES AUXILIARES ----------
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -119,6 +122,11 @@ $$;
 create or replace function public.is_approved() returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from profiles where id = auth.uid() and status = 'approved');
+$$;
+
+create or replace function public.is_supervisor() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from profiles where id = auth.uid() and is_supervisor and status = 'approved');
 $$;
 
 create or replace function public.my_member() returns uuid
@@ -197,6 +205,7 @@ create policy profiles_delete on public.profiles for delete using (public.is_adm
 -- Lista del coro
 create policy members_admin on public.members for all using (public.is_admin()) with check (public.is_admin());
 create policy members_self  on public.members for select using (id = public.my_member());
+create policy members_sup   on public.members for select using (public.is_supervisor());
 
 -- Quedadas: súper usuarios todo; cada uno solo las suyas
 create policy sessions_admin on public.sessions for all using (public.is_admin()) with check (public.is_admin());
@@ -204,11 +213,13 @@ create policy sessions_self  on public.sessions for select using (
   id in (select a.session_id from public.attendance a where a.member_id = public.my_member())
 );
 -- Las quedadas que aún no se han cerrado (próximas) las ven todos los aceptados
+create policy sessions_sup on public.sessions for select using (public.is_supervisor());
 create policy sessions_upcoming on public.sessions for select using (public.is_approved() and not closed);
 
 -- Asistencias: súper usuarios todo; cada uno solo las suyas
 create policy attendance_admin on public.attendance for all using (public.is_admin()) with check (public.is_admin());
 create policy attendance_self  on public.attendance for select using (member_id = public.my_member());
+create policy attendance_sup   on public.attendance for select using (public.is_supervisor());
 
 -- Reglas: todos los aceptados las ven; solo súper usuarios las cambian
 create policy settings_read  on public.settings for select using (public.is_approved());
