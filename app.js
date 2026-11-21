@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v3.2';
+const VERSION = 'v3.3';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -810,7 +810,7 @@ function notifyAdmin(full_name, username){
 /* ---------- inicio ---------- */
 function init(){
   document.addEventListener('click', e => {
-    const n = e.target.closest('nav button'); if(n){ tab=n.dataset.tab; sheet(''); render(); window.scrollTo(0,0); return; }
+    const n = e.target.closest('nav button'); if(n){ tab=n.dataset.tab; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     const el = e.target.closest('[data-act]'); if(!el) return;
     if(el.tagName==='A') e.preventDefault();
     if(el.dataset.act==='closeSheet' && e.target!==el) return;
