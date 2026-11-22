@@ -12,7 +12,9 @@ window.CORO_CONFIG = {
   EMAILJS: {
     SERVICE_ID: 'service_defhykl',
     TEMPLATE_ID: 'template_a297mb7',
-    PUBLIC_KEY: 'oTYwlzDkwRMIvIzhX'
+    PUBLIC_KEY: 'oTYwlzDkwRMIvIzhX',
+    // Plantilla para enviar avisos por correo a quien no tiene la app (Para: {{to_email}}, Asunto: {{subject}}, Mensaje: {{message}})
+    TEMPLATE_AVISO: ''
   },
 
   // Clave pública para los avisos al móvil (la privada está solo en Supabase)

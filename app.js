@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.12';
+const VERSION = 'v4.13';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -35,6 +35,7 @@ const plannedSessions = () => D.sessions.filter(s => !s.closed && s.started === 
 const mapUrl = p => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p + ', Sevilla');
 const placeHtml = s => s && s.place ? `📍 <a href="${mapUrl(s.place)}" target="_blank" rel="noopener">${esc(s.place)}</a>` : '<span class="muted">Sitio sin indicar</span>';
 async function notify(body, quiet){
+  mailNotify(body);
   try{
     const { data, error } = await sb.functions.invoke('notify', { body });
     if(error) throw error;
@@ -158,6 +159,7 @@ async function loadAll(){
       q(sb.from('backups').select('id,created_at').order('id',{ascending:false}).limit(1), true).catch(()=>[])
     ]);
     Object.assign(D, {members, sessions, att, profiles, bote});
+    D.contacts = {}; try{ const { data } = await sb.from('member_contacts').select('*'); (data||[]).forEach(r => D.contacts[r.member_id] = r.email); }catch(e){}
     D.pushN = {}; try{ const { data } = await sb.rpc('push_counts'); (data||[]).forEach(r => D.pushN[r.user_id] = Number(r.n)); }catch(e){}
     await Promise.all([loadAlarms(), loadRsvp(), loadAnn()]);
     D.lastBackup = bk && bk[0] ? bk[0].created_at : null;
@@ -569,6 +571,34 @@ function memberSheet(mid){
     <button class="btn sec" data-act="closeSheet">Cerrar</button>`);
 }
 
+/* ----- AVISOS POR CORREO (para quien no puede instalar la app) ----- */
+async function mailNotify(body){
+  const E = CFG.EMAILJS || {};
+  if(!isAdmin() || !E.SERVICE_ID || !E.TEMPLATE_AVISO || !E.PUBLIC_KEY) return;
+  const contacts = Object.entries(D.contacts||{}).filter(([mid,mail]) => mail && (member(mid)||{}).active !== false);
+  if(!contacts.length) return;
+  const longDate = d => new Date(d+'T12:00:00').toLocaleDateString('es-ES',{weekday:'long', day:'numeric', month:'long'});
+  const when = s => `${longDate(s.date)} a las ${s.start_time}${s.place ? ' en ' + s.place : ''}`;
+  const sess = id => D.sessions.find(x => x.id === id);
+  let msgs = [];   // [member_id, subject, message]
+  const all = (subject, message) => contacts.forEach(([mid]) => msgs.push([mid, subject, message]));
+  if(body.type === 'session_new'){ const s = sess(body.session_id); if(s) all('📅 Nueva quedada del coro', `Nueva quedada: ${when(s)}.`); }
+  else if(body.type === 'session_changed'){ const s = sess(body.session_id); if(s) all('✏️ Cambio en la quedada del coro', `Ahora: ${when(s)}.` + (body.before ? `\nAntes: ${when(body.before)}.` : '')); }
+  else if(body.type === 'session_cancelled'){ const s = body.session; if(s) all('❌ Quedada cancelada', `Se cancela la quedada del ${when(s)}.`); }
+  else if(body.type === 'announcement'){ const an = (D.ann||[]).find(x => x.id === body.announcement_id); if(an && an.audience === 'all') all('📣 ' + (an.title || 'Aviso del coro'), an.body); }
+  else if(body.type === 'payout'){ const s = sess(body.session_id); if(s) contacts.forEach(([mid]) => { const a = attGet(s.id, mid); if(a && a.amount_cents > 0) msgs.push([mid, '💰 Tu parte del reparto', `Quedada del ${longDate(s.date)}: te corresponden ${eur(a.amount_cents)}.`]); }); }
+  let ok = 0;
+  for(const [mid, subject, message] of msgs){
+    try{
+      const r = await fetch('https://api.emailjs.com/api/v1.0/email/send', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ service_id:E.SERVICE_ID, template_id:E.TEMPLATE_AVISO, user_id:E.PUBLIC_KEY,
+          template_params:{ to_email: D.contacts[mid], to_name: (member(mid)||{}).name || '', subject, message, app_url: location.origin + location.pathname } }) });
+      if(r.ok) ok++;
+    }catch(e){}
+  }
+  if(ok) setTimeout(() => toast(`✉️ Enviado también por correo a ${ok} persona${ok>1?'s':''}`), 2600);
+}
+
 /* ----- EMOTICONOS PARA LOS AVISOS ----- */
 const EMOJIS = [
   ['Avisos', ['🔔','📣','📢','⚠️','❗','❓','✅','❌','⏰','🕐','📅','📍','🗓️','🔁','🚨','ℹ️']],
@@ -656,6 +686,7 @@ function renderCoro(){
   const act = D.members.filter(m=>m.active!==false).sort(sortName), ina = D.members.filter(m=>m.active===false).sort(sortName);
   const linked = id => D.profiles.find(p => p.member_id === id && p.status==='approved');
   const li = m => { const u = linked(m.id); return `<div class="list-item"><span>${esc(m.name)}${u?` <span class="tag ok">@${esc(u.username)}</span>`:''}</span><span class="row" style="flex:0;gap:6px">
+     <button class="ic" data-act="mailAsk" data-id="${m.id}" aria-label="Correo para avisos" style="${(D.contacts||{})[m.id]?'color:var(--ok)':''}">✉</button>
      <button class="ic" data-act="rename" data-id="${m.id}">✎</button>
      <button class="ic ${m.active===false?'g':'r'}" data-act="toggleMember" data-id="${m.id}">${m.active===false?'Reactivar':'Quitar'}</button></span></div>`; };
   const pend = D.profiles.filter(p=>p.status==='pending').sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at)));
@@ -901,6 +932,17 @@ async function backup(){
 const A = {
   closeSheet: () => sheet(''),
   emoji(el){ insertEmoji(el.dataset.e); },
+  mailAsk(el){ const m = member(el.dataset.id); const cur = (D.contacts||{})[m.id] || '';
+    sheet(`<h2>Avisos por correo</h2><p class="muted" style="margin-top:-6px">${esc(m.name)}</p>
+      <p class="hint">Para quien no puede instalar la app. Le llegarán por correo las quedadas nuevas, cambios y cancelaciones, los avisos para todo el coro y lo que le toca en cada reparto. Los recordatorios automáticos (1 h antes y por la mañana) no se envían por correo.</p>
+      <label>Correo electrónico</label><input id="mcE" type="email" inputmode="email" autocapitalize="none" autocomplete="off" value="${esc(cur)}" placeholder="nombre@ejemplo.com">
+      <button class="btn" data-act="mailSave" data-id="${m.id}">Guardar</button>
+      ${cur?`<button class="btn danger" data-act="mailDel" data-id="${m.id}">Quitar correo</button>`:''}
+      ${(CFG.EMAILJS||{}).TEMPLATE_AVISO?'':'<p class="hint" style="color:var(--warn)">Falta configurar la plantilla de correo en EmailJS: los correos no se enviarán hasta entonces.</p>'}`); },
+  async mailSave(el){ const mail = (val('mcE')||'').trim().toLowerCase();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) return toast('Escribe un correo válido');
+    try{ await q(sb.from('member_contacts').upsert({member_id: el.dataset.id, email: mail})); D.contacts[el.dataset.id] = mail; sheet(''); render(); toast('Correo guardado ✉️'); }catch(e){} },
+  async mailDel(el){ try{ await q(sb.from('member_contacts').delete().eq('member_id', el.dataset.id)); delete D.contacts[el.dataset.id]; sheet(''); render(); }catch(e){} },
   annAsk(){ emoTarget='anB'; emoPos=null;
     sheet(`<h2>Enviar un aviso</h2>
       <label>Título (opcional)</label><input id="anT" maxlength="60" placeholder="Aviso del coro" autocomplete="off">

@@ -123,6 +123,12 @@ create table if not exists public.announcements (
   audience text not null default 'all' check (audience in ('all','admins'))
 );
 
+-- ---------- v4.13: correo para avisos de quien no puede instalar la app (solo súper usuarios) ----------
+create table if not exists public.member_contacts (
+  member_id uuid primary key references public.members(id) on delete cascade,
+  email text not null
+);
+
 -- ---------- FUNCIONES AUXILIARES ----------
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -218,10 +224,11 @@ alter table public.push_subscriptions enable row level security;
 alter table public.session_alarms enable row level security;
 alter table public.session_rsvp enable row level security;
 alter table public.announcements enable row level security;
+alter table public.member_contacts enable row level security;
 
 do $$ declare r record; begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public'
-           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions','session_alarms','session_rsvp','announcements') loop
+           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions','session_alarms','session_rsvp','announcements','member_contacts') loop
     execute format('drop policy %I on public.%I', r.policyname, r.tablename);
   end loop;
 end $$;
@@ -259,6 +266,7 @@ create policy bote_read  on public.bote for select using (public.is_approved());
 create policy bote_admin on public.bote for all using (public.is_admin()) with check (public.is_admin());
 
 -- Avisos al móvil: cada uno gestiona sus propios dispositivos
+create policy contacts_admin on public.member_contacts for all using (public.is_admin()) with check (public.is_admin());
 create policy ann_admin on public.announcements for all using (public.is_admin()) with check (public.is_admin());
 create policy ann_read  on public.announcements for select using (public.is_approved() and (audience = 'all' or public.is_admin()));
 create policy rsvp_own on public.session_rsvp for all using (user_id = auth.uid()) with check (user_id = auth.uid() and public.is_approved());
