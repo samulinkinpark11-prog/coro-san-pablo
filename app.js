@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.11';
+const VERSION = 'v4.12';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -569,6 +569,23 @@ function memberSheet(mid){
     <button class="btn sec" data-act="closeSheet">Cerrar</button>`);
 }
 
+/* ----- EMOTICONOS PARA LOS AVISOS ----- */
+const EMOJIS = [
+  ['Avisos', ['🔔','📣','📢','⚠️','❗','❓','✅','❌','⏰','🕐','📅','📍','🗓️','🔁','🚨','ℹ️']],
+  ['Navidad', ['🎄','⭐','🌟','✨','🎅','🤶','👼','🕯️','❄️','☃️','🎁','🎶','🎵','🥁','⛪','🙏','✝️','🐑','🐫','👑']],
+  ['Otros', ['😊','😂','🙌','👏','💪','❤️','🎉','☀️','🌧️','☔','🧥','💧','☕','🍪','🍫','💰','🚌','🚶','📸','👍']]
+];
+let emoTarget = 'anB', emoPos = null;
+document.addEventListener('focusin', e => { if(e.target && (e.target.id==='anB' || e.target.id==='anT')){ emoTarget = e.target.id; } });
+['keyup','click','select','input'].forEach(ev => document.addEventListener(ev, e => { if(e.target && (e.target.id==='anB' || e.target.id==='anT')){ emoTarget = e.target.id; emoPos = e.target.selectionStart; } }));
+function insertEmoji(em){
+  const el = document.getElementById(emoTarget) || document.getElementById('anB'); if(!el) return;
+  const v = el.value, p = (emoPos==null || emoPos > v.length) ? v.length : emoPos;
+  if(el.maxLength > 0 && (v.length + em.length) > el.maxLength) return toast('Has llegado al máximo de caracteres');
+  el.value = v.slice(0,p) + em + v.slice(p); emoPos = p + em.length;
+  try{ el.setSelectionRange(emoPos, emoPos); }catch(e){}
+}
+
 /* ----- EXPORTAR A EXCEL ----- */
 function loadScript(src){ return new Promise((ok, ko) => { if(window.XLSX) return ok(); const s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=()=>ko(new Error('No se pudo cargar el generador de Excel')); document.head.appendChild(s); }); }
 async function exportExcel(el){
@@ -883,10 +900,13 @@ async function backup(){
 
 const A = {
   closeSheet: () => sheet(''),
-  annAsk(){
+  emoji(el){ insertEmoji(el.dataset.e); },
+  annAsk(){ emoTarget='anB'; emoPos=null;
     sheet(`<h2>Enviar un aviso</h2>
       <label>Título (opcional)</label><input id="anT" maxlength="60" placeholder="Aviso del coro" autocomplete="off">
       <label>Mensaje</label><textarea id="anB" rows="5" maxlength="500" placeholder="Ej.: Hoy cambiamos el ensayo a las 19:00 en la parroquia" style="resize:vertical"></textarea>
+      <div class="emo">${EMOJIS.map(([g,list])=>`<div class="emo-g">${g}</div><div class="emo-row">${[...list].filter(c=>c.trim()).map(e=>`<button type="button" data-act="emoji" data-e="${e}" aria-label="Añadir ${e}">${e}</button>`).join('')}</div>`).join('')}</div>
+      <p class="hint" style="margin-top:4px">Toca un emoticono para añadirlo donde esté el cursor (en el título o en el mensaje).</p>
       <label>¿A quién?</label><select id="anA"><option value="all">A todo el coro</option><option value="admins">Solo a súper usuarios (para probar)</option></select>
       <button class="btn" data-act="annSend">Enviar aviso</button>
       <button class="btn sec" data-act="closeSheet">Cancelar</button>`);
