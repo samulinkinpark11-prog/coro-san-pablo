@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.14';
+const VERSION = 'v4.15';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -43,6 +43,7 @@ async function notify(body, quiet){
     return data;
   }catch(e){
     console.warn('notify', e);
+    if(isNetErr(e)){ if(!quiet) toast('📴 Sin cobertura: el aviso no se ha enviado'); return null; }
     let det = e && e.message || String(e);
     try{ const r = e && e.context; if(r && typeof r.status==='number'){ let t=''; try{ t = await r.clone().text(); }catch(_){} det = `HTTP ${r.status}` + (t ? ` · ${t.slice(0,160)}` : ''); } }catch(_){}
     if(!quiet){ sheet(`<h2>⚠️ No se pudo enviar el aviso</h2><p class="muted">Manda una captura de esto a quien configuró la app:</p><pre style="white-space:pre-wrap;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px">${esc(det)}</pre><button class="btn sec" data-act="closeSheet">Cerrar</button>`); }
@@ -97,7 +98,7 @@ function heroCard(s, actions){
 const val = id => (document.getElementById(id)||{}).value;
 
 function toast(t){ const el=document.getElementById('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(toast._t); toast._t=setTimeout(()=>el.classList.remove('on'),2400); }
-function sheet(html){ document.getElementById('sheet').innerHTML = html ? `<div class="sheet-bg" data-act="closeSheet"><div class="sheet">${html}</div></div>` : ''; }
+function sheet(html){ if(!html){ stopScan(); stopQr(); } document.getElementById('sheet').innerHTML = html ? `<div class="sheet-bg" data-act="closeSheet"><div class="sheet">${html}</div></div>` : ''; }
 async function q(promise, silent){
   const { data, error } = await promise;
   if(error){ console.error(error); if(!silent) toast('⚠️ ' + traducir(error.message)); throw error; }
@@ -147,10 +148,58 @@ function calc(s, rows, end, botinC, gastosC, st){
   return { rows: out, dur, botin: botinC||0, gastos: gastosC||0, repartible, repartido, sobrante: repartible - repartido };
 }
 
+/* ---------- SIN COBERTURA: cola de cambios y copia local ---------- */
+const OBX_KEY = () => 'coro-outbox-' + (authUser ? authUser.id : '');
+const CACHE_KEY = () => 'coro-cache-' + (authUser ? authUser.id : '');
+let outbox = [], offline = false, flushing = false;
+const newId = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random()*16|0; return (c==='x' ? r : (r&0x3|0x8)).toString(16); });
+const isNetErr = e => !navigator.onLine || /fetch|network|load failed|timeout|offline|conexi/i.test(String(e && (e.message || e)));
+function loadOutbox(){ try{ outbox = JSON.parse(localStorage.getItem(OBX_KEY()) || '[]'); }catch(e){ outbox = []; } }
+function saveOutbox(){ try{ localStorage.setItem(OBX_KEY(), JSON.stringify(outbox)); }catch(e){} updateNetBanner(); }
+function saveCache(){ try{ if(me && me.status==='approved') localStorage.setItem(CACHE_KEY(), JSON.stringify({me, D:{...D, alarms:[...(D.alarms||[])]}, at:Date.now()})); }catch(e){} }
+function readCache(){ try{ const c = JSON.parse(localStorage.getItem(CACHE_KEY()) || 'null'); if(c && c.D){ c.D.alarms = new Set(c.D.alarms || []); } return c; }catch(e){ return null; } }
+function updateNetBanner(){
+  const el = document.getElementById('net'); if(!el) return;
+  const n = outbox.length;
+  if(n || offline){ el.hidden = false; el.innerHTML = `📴 Sin cobertura${n ? ` · <b>${n}</b> cambio${n>1?'s':''} pendiente${n>1?'s':''} de subir` : ' · viendo los datos guardados en el móvil'}`; }
+  else el.hidden = true;
+}
+function runOp(op){
+  const t = sb.from(op.table);
+  if(op.kind==='upsert') return t.upsert(op.rows);
+  if(op.kind==='insert') return t.insert(op.rows);
+  let x = op.kind==='update' ? t.update(op.patch) : t.delete();
+  Object.entries(op.match||{}).forEach(([k,v]) => { x = x.eq(k, v); });
+  return x;
+}
+// Escribe ya; si no hay cobertura lo guarda en la cola y lo sube después, en el mismo orden
+async function write(op){
+  if(outbox.length){ outbox.push(op); saveOutbox(); saveCache(); flush(); return; }
+  try{ const { error } = await runOp(op); if(error) throw error; if(offline){ offline = false; updateNetBanner(); } }
+  catch(e){
+    if(isNetErr(e)){ outbox.push(op); offline = true; saveOutbox(); toast('📴 Sin cobertura: se guardará al volver la conexión'); }
+    else { toast('⚠️ ' + traducir(e.message)); scheduleReload(); }
+  }
+  saveCache();
+}
+async function flush(){
+  if(flushing || !outbox.length || !navigator.onLine) return;
+  flushing = true; let done = 0;
+  try{
+    while(outbox.length){
+      const op = outbox[0];
+      try{ const { error } = await runOp(op); if(error) throw error; done++; }
+      catch(e){ if(isNetErr(e)) break; console.warn('Cambio descartado', op, e); }
+      outbox.shift(); saveOutbox();
+    }
+    if(!outbox.length){ offline = false; updateNetBanner(); if(done) toast(`✅ ${done} cambio${done>1?'s':''} guardado${done>1?'s':''} al volver la cobertura`); try{ await loadAll(); render(); }catch(e){} }
+  } finally { flushing = false; }
+}
+
 /* ---------- carga de datos ---------- */
 async function loadAll(){
   const st = await q(sb.from('settings').select('data').eq('id',1).maybeSingle(), true).catch(()=>null);
-  D.settings = Object.assign({...DEF_SETTINGS}, (st && st.data) || {});
+  if(st || !D.settings || !D.settings.tramos) D.settings = Object.assign({...DEF_SETTINGS}, (st && st.data) || {});
   if(isAdmin()){
     const [members, sessions, att, profiles, bote, bk] = await Promise.all([
       q(sb.from('members').select('*')),
@@ -175,6 +224,7 @@ async function loadAll(){
     Object.assign(D, {members, sessions, att, bote, profiles:[]});
     await Promise.all([loadAlarms(), loadRsvp(), loadAnn()]);
   }
+  offline = false; updateNetBanner(); saveCache();
 }
 async function loadAnn(){
   D.ann = [];
@@ -196,6 +246,8 @@ async function loadAlarms(){
 }
 let reloadT = null;
 function scheduleReload(){ clearTimeout(reloadT); reloadT = setTimeout(async ()=>{
+  if(!navigator.onLine) return;
+  if(outbox.length){ await flush(); if(outbox.length) return; }
   try{ const wasAdmin = isAdmin(), wasSt = me && me.status; await refreshMe();
        if(!me || me.status !== wasSt || isAdmin() !== wasAdmin) return boot();
        await loadAll(); render(); }catch(e){} }, 700); }
@@ -217,13 +269,18 @@ async function boot(){
     const { data:{ session } } = await sb.auth.getSession();
     authUser = session ? session.user : null;
     if(!authUser){ me = null; renderAuth(); return; }
+    loadOutbox();
     await refreshMe();
+    if(!me){ const c = readCache(); if(c && c.me){ me = c.me; offline = true; } }
     if(!me){ renderMsg('No se encontró tu perfil', 'Vuelve a intentarlo en un momento.' + (meErr ? `<br><small>Detalle: ${esc(meErr)}</small>` : '')); return; }
     if(me.status === 'pending'){ renderMsg('⏳ Solicitud pendiente', `Hola ${esc(me.full_name)}. Un responsable del coro tiene que aceptar tu registro. Vuelve a entrar más tarde.`); return; }
     if(me.status === 'rejected'){ renderMsg('Acceso no autorizado', 'Tu solicitud no ha sido aceptada. Habla con un responsable del coro.'); return; }
     tab = isAdmin() ? (['hoy','cal','coro','historial','sup','avisos','yo','cuenta','ajustes'].includes(tab)?tab:'hoy') : isSup() ? (['cal','sup','avisos','cuenta'].includes(tab)?tab:'sup') : (['cal','avisos','yo','cuenta'].includes(tab)?tab:'yo');
     loading = true; render();
-    await loadAll(); await checkPush(); loading = false;
+    if(outbox.length && navigator.onLine) await flush();
+    try{ await loadAll(); }
+    catch(err){ const c = readCache(); if(!c) throw err; Object.assign(D, c.D); offline = true; updateNetBanner(); toast('📴 Sin cobertura: viendo los datos guardados'); }
+    await checkPush(); loading = false;
     subscribe(); render(); applyDeepLink();
     const np = D.profiles.filter(p=>p.status==='pending').length;
     if(isAdmin() && np) toast(`🔔 Tienes ${np} solicitud${np>1?'es':''} de acceso pendiente${np>1?'s':''} (pestaña Coro)`);
@@ -373,6 +430,7 @@ function renderHoy(){
         <div class="stat"><b>${c.left}</b><small>se fueron</small></div>
         <div class="stat"><b>${c.absent}</b><small>no vienen</small></div>
       </div>
+      ${!isEnded(s)?`<button class="btn" data-act="showQr">${IC('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>').replace('<svg','<svg width="20" height="20"')} Mostrar QR de llegada</button>`:''}
       ${pend.length?`<button class="btn sec" data-act="allOnTime">✓ Marcar los ${pend.length} sin marcar como llegados a las ${esc(s.start_time)}</button>`:''}
     </div>
     <div class="card">${items || '<div class="empty">No hay nadie en la lista.</div>'}
@@ -389,6 +447,7 @@ function applyDeepLink(){
   pendingLink = '';
   try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){}
   sheet(''); focusId = null;
+  if(h.startsWith('#llegada=')){ const [sid, code] = h.slice(9).split('.'); if(sid && code) doCheckin(sid, code); return; }
   if(h.startsWith('#cal')){
     const id = h.split('=')[1]; const s = id && D.sessions.find(x => x.id === id);
     tab = 'cal';
@@ -603,6 +662,80 @@ async function mailNotify(body){
   if(ok) setTimeout(() => toast(`✉️ Enviado también por correo a ${ok} persona${ok>1?'s':''}`), 2600);
 }
 
+/* ----- LLEGADA CON CÓDIGO QR ----- */
+const QR_LIB = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+const JSQR_LIB = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+let qrTimer = null, qrCode = null, qrSession = null;
+function stopQr(){ if(qrTimer){ clearInterval(qrTimer); qrTimer = null; } }
+const randCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32]).join('');
+async function showQr(){
+  const s = activeSession(); if(!s) return;
+  try{ await loadScript(QR_LIB, 'qrcode'); }catch(e){ return toast('📴 Sin cobertura: no se puede mostrar el QR'); }
+  qrSession = s.id; qrCode = null;
+  sheet(`<h2>QR de llegada</h2><p class="muted" style="margin-top:-6px">${fmtDate(s.date)} · ${esc(s.start_time)}${s.place?' · '+esc(s.place):''}</p>
+    <div id="qrBox" style="background:#fff;border-radius:18px;padding:14px;margin:8px auto;max-width:300px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;color:#13213F">Generando…</div>
+    <p id="qrInfo" class="hint" style="text-align:center">El código cambia cada 40 segundos.</p>
+    <p class="hint">Cada uno lo escanea <b>desde la app</b>: <b>Mis asistencias → Escanear QR de llegada</b>. Se le marcará la llegada con la hora exacta. A quien no tenga la app, márcalo tú a mano en la lista.</p>
+    <button class="btn sec" data-act="closeSheet">Cerrar</button>`);
+  const tick = async () => {
+    const box = document.getElementById('qrBox'); if(!box){ stopQr(); return; }
+    const prev = qrCode, code = randCode();
+    const { error } = await sb.from('session_checkin').upsert({session_id: s.id, code, prev, updated_at: new Date().toISOString()});
+    if(error){ document.getElementById('qrInfo').innerHTML = isNetErr(error) ? '📴 Sin cobertura: el QR no funcionará hasta que vuelva la conexión.' : '⚠️ ' + esc(traducir(error.message)); if(qrCode) return; }
+    else { qrCode = code; document.getElementById('qrInfo').textContent = 'El código cambia cada 40 segundos.'; }
+    const url = location.origin + location.pathname + '#llegada=' + s.id + '.' + (qrCode || code);
+    const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+    box.innerHTML = qr.createSvgTag({cellSize: 6, margin: 0, scalable: true}).replace('<svg ', '<svg style="width:100%;height:100%" ');
+  };
+  await tick(); stopQr(); qrTimer = setInterval(tick, 40000);
+}
+
+let scanStream = null, scanRaf = null;
+function stopScan(){ if(scanRaf){ cancelAnimationFrame(scanRaf); scanRaf = null; } if(scanStream){ scanStream.getTracks().forEach(t => t.stop()); scanStream = null; } }
+async function startScan(){
+  if(!navigator.onLine) return toast('📴 Necesitas cobertura para fichar la llegada');
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return toast('Este móvil no deja usar la cámara desde la app. Pide que te marquen a mano.');
+  try{ await loadScript(JSQR_LIB, 'jsQR'); }catch(e){ return toast('📴 Sin cobertura: no se puede abrir el escáner'); }
+  sheet(`<h2>Escanear QR de llegada</h2>
+    <div style="position:relative;border-radius:18px;overflow:hidden;background:#000;aspect-ratio:1;max-width:340px;margin:0 auto">
+      <video id="scanV" playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
+      <div style="position:absolute;inset:18%;border:3px solid var(--oro);border-radius:16px"></div>
+    </div>
+    <p id="scanInfo" class="hint" style="text-align:center">Apunta al QR que enseña el responsable.</p>
+    <canvas id="scanC" hidden></canvas>
+    <button class="btn sec" data-act="closeSheet">Cancelar</button>`);
+  try{
+    scanStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:false});
+  }catch(e){ document.getElementById('scanInfo').textContent = 'No se ha podido abrir la cámara. Revisa en Ajustes del móvil que la app tenga permiso de cámara.'; return; }
+  const v = document.getElementById('scanV'), c = document.getElementById('scanC'), ctx = c.getContext('2d', {willReadFrequently:true});
+  v.srcObject = scanStream; await v.play().catch(()=>{});
+  const loop = () => {
+    if(!scanStream) return;
+    if(v.readyState >= 2 && v.videoWidth){
+      const w = 480, h = Math.round(v.videoHeight * w / v.videoWidth); c.width = w; c.height = h;
+      ctx.drawImage(v, 0, 0, w, h);
+      const res = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, {inversionAttempts:'dontInvert'});
+      const m = res && res.data && res.data.match(/#llegada=([0-9a-f-]{36})\.([A-Z0-9]{4,12})/i);
+      if(m){ stopScan(); doCheckin(m[1], m[2]); return; }
+    }
+    scanRaf = requestAnimationFrame(loop);
+  };
+  loop();
+}
+async function doCheckin(sid, code){
+  sheet(`<h2>Fichando…</h2><p class="muted">Un momento.</p>`);
+  try{
+    const { data, error } = await sb.rpc('checkin', {p_session: sid, p_code: code});
+    if(error) throw error;
+    const a = me.member_id && attGet(sid, me.member_id);
+    if(a){ a.status = 'present'; a.arrive = data; a.leave = null; }
+    sheet(`<div style="text-align:center;padding:10px 0"><div style="font-size:54px">✅</div><h2>Llegada registrada</h2><p class="muted">A las <b style="color:var(--oro)">${esc(data)}</b>. ¡A cantar!</p><button class="btn" data-act="closeSheet">Hecho</button></div>`);
+    render(); scheduleReload();
+  }catch(e){
+    sheet(`<h2>No se pudo fichar</h2><p class="muted">${esc(isNetErr(e) ? 'Sin cobertura. Inténtalo de nuevo en un momento.' : traducir(e.message))}</p><button class="btn" data-act="scanQr">Volver a escanear</button><button class="btn sec" data-act="closeSheet">Cerrar</button>`);
+  }
+}
+
 /* ----- EMOTICONOS PARA LOS AVISOS ----- */
 const EMOJIS = [
   ['Avisos', ['🔔','📣','📢','⚠️','❗','❓','✅','❌','⏰','🕐','📅','📍','🗓️','🔁','🚨','ℹ️']],
@@ -621,7 +754,7 @@ function insertEmoji(em){
 }
 
 /* ----- EXPORTAR A EXCEL ----- */
-function loadScript(src){ return new Promise((ok, ko) => { if(window.XLSX) return ok(); const s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=()=>ko(new Error('No se pudo cargar el generador de Excel')); document.head.appendChild(s); }); }
+function loadScript(src, globalName){ return new Promise((ok, ko) => { if(window[globalName || 'XLSX']) return ok(); const s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=()=>ko(new Error('No se pudo cargar (¿sin cobertura?)')); document.head.appendChild(s); }); }
 async function exportExcel(el){
   busy(el,true);
   try{
@@ -771,7 +904,9 @@ function renderYo(){
     const mins = mine.reduce((acc,x)=>acc+x.a.present_min,0);
     const open = D.sessions.find(s=>!s.closed && s.started!==false && attGet(s.id, mid));
     let hoy = '';
-    if(open){ const a = attGet(open.id, mid); hoy = `<div class="card" style="border:2px solid var(--oro)"><b>Quedada en curso · ${fmtDate(open.date)} ${esc(open.start_time)}</b><div class="det" style="margin-top:6px">${statusInfo(open,a).txt}</div></div>`; }
+    if(open){ const a = attGet(open.id, mid); const yaEsta = a && a.status==='present';
+      hoy = `<div class="card" style="border:2px solid var(--oro)"><b>Quedada en curso · ${fmtDate(open.date)} ${esc(open.start_time)}</b><div class="det" style="margin-top:6px">${statusInfo(open,a).txt}</div>
+        ${!yaEsta && !open.end_time ? `<button class="btn" data-act="scanQr">📷 Escanear QR de llegada</button><p class="hint">Pide al responsable que te enseñe el QR.</p>` : ''}</div>`; }
     body = `${hoy}
       <div class="tiles">
         <div class="tile"><div class="l">Llevas ganado</div><div class="v g">${eur(total)}</div></div>
@@ -911,7 +1046,8 @@ function viewSession(id){
 async function fillAttendance(sid){
   const have = new Set(attOf(sid).map(a=>a.member_id));
   const rows = D.members.filter(m=>m.active!==false && !have.has(m.id)).map(m=>({session_id:sid, member_id:m.id, status:'pending'}));
-  if(rows.length) await q(sb.from('attendance').insert(rows));
+  rows.forEach(r => D.att.push({...r, arrive:null, leave:null, late_min:0, early_min:0, present_min:0, weight:0, amount_cents:0}));
+  if(rows.length) await write({table:'attendance', kind:'upsert', rows});
 }
 function sessionSheet(s){
   if(!s) return;
@@ -928,8 +1064,7 @@ async function setAtt(sid, mid, patch){
   let a = attGet(sid, mid);
   if(!a){ a = {session_id:sid, member_id:mid, status:'pending', arrive:null, leave:null, late_min:0, early_min:0, present_min:0, weight:0, amount_cents:0}; D.att.push(a); }
   Object.assign(a, patch); render();
-  try{ await q(sb.from('attendance').upsert({session_id:sid, member_id:mid, status:a.status, arrive:a.arrive||null, leave:a.leave||null})); }
-  catch(e){ scheduleReload(); }
+  await write({table:'attendance', kind:'upsert', rows:[{session_id:sid, member_id:mid, status:a.status, arrive:a.arrive||null, leave:a.leave||null}]});
 }
 async function backup(){
   try{
@@ -948,6 +1083,8 @@ async function backup(){
 const A = {
   closeSheet: () => sheet(''),
   emoji(el){ insertEmoji(el.dataset.e); },
+  showQr(){ showQr(); },
+  scanQr(){ startScan(); },
   goCuenta(){ tab='cuenta'; render(); document.getElementById('app').scrollTop=0; },
   mailAsk(el){ const m = member(el.dataset.id); const cur = (D.contacts||{})[m.id] || '';
     sheet(`<h2>Avisos por correo</h2><p class="muted" style="margin-top:-6px">${esc(m.name)}</p>
@@ -1066,12 +1203,11 @@ const A = {
 
   async startSession(el){
     if(activeSession()) return;
-    busy(el,true);
-    try{
-      const s = await q(sb.from('sessions').insert({date:val('nsDate')||today(), start_time:val('nsStart')||S().start, place:(val('nsPlace')||'').trim()||null, started:true}).select().single());
-      await fillAttendance(s.id);
-      await loadAll(); render();
-    }catch(e){ busy(el,false); }
+    const s = {id:newId(), date:val('nsDate')||today(), start_time:val('nsStart')||S().start, place:(val('nsPlace')||'').trim()||null, started:true,
+      closed:false, end_time:null, botin_cents:0, gastos_cents:0, repartido_cents:0, sobrante_cents:0, reminded:false, created_at:new Date().toISOString()};
+    D.sessions.push(s); focusId = null; render();
+    await write({table:'sessions', kind:'insert', rows:[{id:s.id, date:s.date, start_time:s.start_time, place:s.place, started:true}]});
+    await fillAttendance(s.id); render();
   },
   async planSession(el){
     const date=val('nsDate'), time=val('nsStart'), place=(val('nsPlace')||'').trim();
@@ -1086,9 +1222,9 @@ const A = {
   async startPlanned(el){
     if(activeSession()) return toast('Ya hay una quedada en curso');
     const s = D.sessions.find(x=>x.id===el.dataset.id); if(!s) return;
-    busy(el,true);
-    try{ await q(sb.from('sessions').update({started:true}).eq('id', s.id)); await fillAttendance(s.id); await loadAll(); render(); }
-    catch(e){ busy(el,false); }
+    s.started = true; focusId = null; render();
+    await write({table:'sessions', kind:'update', patch:{started:true}, match:{id:s.id}});
+    await fillAttendance(s.id); render();
   },
   editPlanned(el){ sessionSheet(D.sessions.find(x=>x.id===el.dataset.id)); },
   arrive(el){ const s=openSession(); setAtt(s.id, el.dataset.id, {status:'present', arrive:nowHM(), leave:null}); toast('Llegada anotada a las '+nowHM()); },
@@ -1102,12 +1238,12 @@ const A = {
     sheet(''); setAtt(s.id, el.dataset.id, patch);
   },
   async removeFromSession(el){ const s=openSession(); sheet(''); D.att = D.att.filter(a=>!(a.session_id===s.id && a.member_id===el.dataset.id)); render();
-    try{ await q(sb.from('attendance').delete().eq('session_id',s.id).eq('member_id',el.dataset.id)); }catch(e){ scheduleReload(); } },
+    await write({table:'attendance', kind:'delete', match:{session_id:s.id, member_id:el.dataset.id}}); },
   async allOnTime(){
     const s=openSession(); const pend = attOf(s.id).filter(a=>a.status==='pending');
     if(!confirm(`¿Seguro que han llegado TODOS a su hora (${s.start_time})?\n\n${pend.map(a=>member(a.member_id)?.name).join(', ')}\n\nSi falta alguien, márcalo uno a uno.`)) return;
     pend.forEach(a=>{ a.status='present'; a.arrive=s.start_time; a.leave=null; }); render();
-    try{ await q(sb.from('attendance').upsert(pend.map(a=>({session_id:s.id, member_id:a.member_id, status:'present', arrive:s.start_time, leave:null})))); }catch(e){ scheduleReload(); }
+    await write({table:'attendance', kind:'upsert', rows: pend.map(a=>({session_id:s.id, member_id:a.member_id, status:'present', arrive:s.start_time, leave:null}))});
   },
   addInSession(){
     const s=openSession(); const inList = new Set(attOf(s.id).map(a=>a.member_id));
@@ -1159,9 +1295,8 @@ const A = {
   },
   async endSession(el){
     const s=openSession(); const end = val('eEnd') || nowHM();
-    busy(el,true);
-    try{ await q(sb.from('sessions').update({end_time:end}).eq('id', s.id)); s.end_time = end; focusId = null; sheet(''); render(); toast('Quedada terminada a las '+end+'. Queda pendiente de reparto.'); }
-    catch(e){ busy(el,false); }
+    s.end_time = end; focusId = null; sheet(''); render(); toast('Quedada terminada a las '+end+'. Queda pendiente de reparto.');
+    await write({table:'sessions', kind:'update', patch:{end_time:end}, match:{id:s.id}});
   },
   async resumeSession(){
     const s=openSession(); const act=activeSession(); if(act && act.id!==s.id) return toast('Ya hay otra quedada en curso');
@@ -1314,7 +1449,7 @@ function pushCard(){
   return `<div class="card"><h2>Notificaciones en este móvil</h2>${inner}</div>`;
 }
 function upcomingCard(){
-  const up = D.sessions.filter(s=>!s.closed && !isEnded(s)).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
+  const up = D.sessions.filter(s=>!s.closed && !isEnded(s) && !(s.started!==false && me.member_id && attGet(s.id, me.member_id))).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
   const ended = D.sessions.filter(isEnded);
   const pendCard = ended.length ? `<div class="card"><b>${ended.length===1?'1 quedada pendiente de reparto':ended.length+' quedadas pendientes de reparto'}</b>
     <div class="muted" style="margin-top:4px">${ended.map(s=>`${fmtDate(s.date)} ${esc(s.start_time)}`).join(' · ')}</div>
@@ -1352,6 +1487,9 @@ function init(){
   });
   document.addEventListener('visibilitychange', () => { if(document.visibilityState==='visible' && me && me.status==='approved') scheduleReload(); });
   setInterval(()=>{ if(isAdmin() && tab==='hoy' && openSession() && !document.getElementById('sheet').innerHTML && !document.activeElement?.matches('input,select,textarea')) render(); }, 30000);
+  window.addEventListener('online', () => { flush().then(()=>{ if(!outbox.length) scheduleReload(); }); });
+  window.addEventListener('offline', () => { offline = true; updateNetBanner(); });
+  setInterval(() => { if(outbox.length) flush(); }, 20000);
   if('serviceWorker' in navigator){ navigator.serviceWorker.addEventListener('message', ev => { if(ev.data && ev.data.deepLink!==undefined){ pendingLink = ev.data.deepLink || '#cal'; if(!loading) applyDeepLink(); } }); }
   window.addEventListener('hashchange', () => { if(location.hash){ pendingLink = location.hash; if(!loading) applyDeepLink(); } });
   if('serviceWorker' in navigator && location.protocol==='https:'){ navigator.serviceWorker.register('sw.js', {updateViaCache:'none'}).then(r=>r.update()).catch(()=>{}); }

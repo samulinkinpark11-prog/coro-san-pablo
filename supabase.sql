@@ -129,6 +129,14 @@ create table if not exists public.member_contacts (
   email text not null
 );
 
+-- ---------- v4.15: llegada con código QR (el código cambia cada pocos segundos) ----------
+create table if not exists public.session_checkin (
+  session_id uuid primary key references public.sessions(id) on delete cascade,
+  code text not null,
+  prev text,
+  updated_at timestamptz default now()
+);
+
 -- ---------- FUNCIONES AUXILIARES ----------
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -155,6 +163,28 @@ language sql stable security definer set search_path = public as $$
   select not exists (select 1 from profiles where lower(username) = lower(u));
 $$;
 grant execute on function public.username_available(text) to anon, authenticated;
+
+-- Fichar la llegada escaneando el QR del súper usuario
+create or replace function public.checkin(p_session uuid, p_code text) returns text
+language plpgsql security definer set search_path = public as $$
+declare mid uuid; s record; c record; a record; hm text;
+begin
+  mid := public.my_member();
+  if mid is null then raise exception 'Tu usuario no está asociado a ningún nombre de la lista'; end if;
+  select * into s from sessions where id = p_session;
+  if s is null or s.closed or not s.started or s.end_time is not null then raise exception 'Esta quedada no está en curso'; end if;
+  select * into c from session_checkin where session_id = p_session;
+  if c is null or (p_code is distinct from c.code and p_code is distinct from c.prev) or c.updated_at < now() - interval '3 minutes' then
+    raise exception 'Código caducado. Escanea el QR otra vez';
+  end if;
+  select * into a from attendance where session_id = p_session and member_id = mid;
+  if a is not null and a.status = 'present' then return coalesce(a.arrive, s.start_time); end if;
+  hm := to_char(now() at time zone 'Europe/Madrid', 'HH24:MI');
+  insert into attendance (session_id, member_id, status, arrive, "leave") values (p_session, mid, 'present', hm, null)
+  on conflict (session_id, member_id) do update set status = 'present', arrive = excluded.arrive, "leave" = null;
+  return hm;
+end $$;
+grant execute on function public.checkin(uuid, text) to authenticated;
 
 -- Recuento de «Voy / No puedo» por quedada (todos los aceptados lo ven, sin nombres)
 create or replace function public.rsvp_counts() returns table(session_id uuid, yes_count bigint, no_count bigint)
@@ -225,10 +255,11 @@ alter table public.session_alarms enable row level security;
 alter table public.session_rsvp enable row level security;
 alter table public.announcements enable row level security;
 alter table public.member_contacts enable row level security;
+alter table public.session_checkin enable row level security;
 
 do $$ declare r record; begin
   for r in select policyname, tablename from pg_policies where schemaname = 'public'
-           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions','session_alarms','session_rsvp','announcements','member_contacts') loop
+           and tablename in ('members','profiles','sessions','attendance','settings','bote','backups','push_subscriptions','session_alarms','session_rsvp','announcements','member_contacts','session_checkin') loop
     execute format('drop policy %I on public.%I', r.policyname, r.tablename);
   end loop;
 end $$;
@@ -266,6 +297,7 @@ create policy bote_read  on public.bote for select using (public.is_approved());
 create policy bote_admin on public.bote for all using (public.is_admin()) with check (public.is_admin());
 
 -- Avisos al móvil: cada uno gestiona sus propios dispositivos
+create policy checkin_admin on public.session_checkin for all using (public.is_admin()) with check (public.is_admin());
 create policy contacts_admin on public.member_contacts for all using (public.is_admin()) with check (public.is_admin());
 create policy ann_admin on public.announcements for all using (public.is_admin()) with check (public.is_admin());
 create policy ann_read  on public.announcements for select using (public.is_approved() and (audience = 'all' or public.is_admin()));

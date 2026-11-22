@@ -39,6 +39,7 @@ header{background:var(--fondo);color:#fff;padding:calc(env(safe-area-inset-top) 
 header .logo{width:44px;height:44px;flex:0 0 44px}
 header .ttl{display:flex;flex-direction:column;min-width:0}
 header small{font-size:13px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.net{flex:0 0 auto;margin:0 12px 6px;padding:8px 12px;border-radius:12px;background:rgba(245,165,36,.16);color:var(--warn);font-size:13px;font-weight:600;text-align:center}.net[hidden]{display:none}
 .hbtns{margin-left:auto;display:flex;gap:8px;flex:0 0 auto}.hbtn{width:42px;height:42px;border-radius:13px;border:1px solid var(--line2);background:var(--card);color:var(--sub);align-items:center;justify-content:center;flex:0 0 42px;padding:0}.hbtn.on{color:var(--oro);border-color:var(--oro)}
 header h1{margin:0;font-size:clamp(18px,5.4vw,22px);white-space:nowrap;font-weight:700;letter-spacing:-.3px;line-height:1.15}
 main{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:10px max(14px, calc((100% - 612px) / 2)) 20px}
@@ -147,12 +148,13 @@ nav button{font-size:10px}
 <button id="gear" class="hbtn" aria-label="Ajustes" style="display:none"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></button>
 <button id="userBtn" class="hbtn" aria-label="Mi cuenta" style="display:none"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.7a7 7 0 0 1 10 0"/></svg></button></div>
 </header>
+<div id="net" class="net" hidden></div>
 <main id="app"><div class="empty">Cargando…</div></main>
 <nav style="display:none"></nav>
 <div id="sheet"></div>
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js?v=8"></script>
-<script src="app.js?v=27"></script>
+<script src="app.js?v=28"></script>
 </body>
 </html>
