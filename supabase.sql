@@ -174,7 +174,7 @@ begin
   select * into s from sessions where id = p_session;
   if s is null or s.closed or not s.started or s.end_time is not null then raise exception 'Esta quedada no está en curso'; end if;
   select * into c from session_checkin where session_id = p_session;
-  if c is null or (p_code is distinct from c.code and p_code is distinct from c.prev) or c.updated_at < now() - interval '3 minutes' then
+  if c is null or (p_code is distinct from c.code and p_code is distinct from c.prev) or c.updated_at < now() - interval '20 seconds' then
     raise exception 'Código caducado. Escanea el QR otra vez';
   end if;
   select * into a from attendance where session_id = p_session and member_id = mid;

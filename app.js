@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.15';
+const VERSION = 'v4.16';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -674,20 +674,25 @@ async function showQr(){
   qrSession = s.id; qrCode = null;
   sheet(`<h2>QR de llegada</h2><p class="muted" style="margin-top:-6px">${fmtDate(s.date)} · ${esc(s.start_time)}${s.place?' · '+esc(s.place):''}</p>
     <div id="qrBox" style="background:#fff;border-radius:18px;padding:14px;margin:8px auto;max-width:300px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;color:#13213F">Generando…</div>
-    <p id="qrInfo" class="hint" style="text-align:center">El código cambia cada 40 segundos.</p>
+    <div style="height:6px;border-radius:3px;background:var(--card2);overflow:hidden;max-width:300px;margin:0 auto"><div id="qrBar" style="height:100%;width:100%;background:var(--oro)"></div></div>
+    <p id="qrInfo" class="hint" style="text-align:center">El código cambia cada 5 segundos.</p>
     <p class="hint">Cada uno lo escanea <b>desde la app</b>: <b>Mis asistencias → Escanear QR de llegada</b>. Se le marcará la llegada con la hora exacta. A quien no tenga la app, márcalo tú a mano en la lista.</p>
     <button class="btn sec" data-act="closeSheet">Cerrar</button>`);
+  let busyTick = false;
   const tick = async () => {
     const box = document.getElementById('qrBox'); if(!box){ stopQr(); return; }
+    if(busyTick) return; busyTick = true;
     const prev = qrCode, code = randCode();
     const { error } = await sb.from('session_checkin').upsert({session_id: s.id, code, prev, updated_at: new Date().toISOString()});
-    if(error){ document.getElementById('qrInfo').innerHTML = isNetErr(error) ? '📴 Sin cobertura: el QR no funcionará hasta que vuelva la conexión.' : '⚠️ ' + esc(traducir(error.message)); if(qrCode) return; }
-    else { qrCode = code; document.getElementById('qrInfo').textContent = 'El código cambia cada 40 segundos.'; }
+    if(error){ busyTick = false; document.getElementById('qrInfo').innerHTML = isNetErr(error) ? '📴 Sin cobertura: el QR no funcionará hasta que vuelva la conexión.' : '⚠️ ' + esc(traducir(error.message)); if(qrCode) return; }
+    else { qrCode = code; document.getElementById('qrInfo').textContent = 'El código cambia cada 5 segundos.'; }
+    busyTick = false;
+    const bar = document.getElementById('qrBar'); if(bar){ bar.style.transition = 'none'; bar.style.width = '100%'; void bar.offsetWidth; bar.style.transition = 'width 5s linear'; bar.style.width = '0%'; }
     const url = location.origin + location.pathname + '#llegada=' + s.id + '.' + (qrCode || code);
     const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
     box.innerHTML = qr.createSvgTag({cellSize: 6, margin: 0, scalable: true}).replace('<svg ', '<svg style="width:100%;height:100%" ');
   };
-  await tick(); stopQr(); qrTimer = setInterval(tick, 40000);
+  await tick(); stopQr(); qrTimer = setInterval(tick, 5000);
 }
 
 let scanStream = null, scanRaf = null;
