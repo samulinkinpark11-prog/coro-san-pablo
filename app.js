@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.13';
+const VERSION = 'v4.14';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -61,12 +61,14 @@ const IC = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const ICONS = {
   hoy: IC('<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>'),
   cal: IC('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>'),
+  coins: IC('<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>'),
   sup: IC('<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>'),
   bellNav: IC('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>'),
   bell: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
   coro: IC('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>'),
   historial: IC('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>'),
-  yo: IC('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>'),
+  cuenta: IC('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.7a7 7 0 0 1 10 0"/>'),
+  yoOld: IC('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>'),
   ajustes: IC('<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'),
   pin: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;margin-top:1px"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>'
 };
@@ -219,7 +221,7 @@ async function boot(){
     if(!me){ renderMsg('No se encontró tu perfil', 'Vuelve a intentarlo en un momento.' + (meErr ? `<br><small>Detalle: ${esc(meErr)}</small>` : '')); return; }
     if(me.status === 'pending'){ renderMsg('⏳ Solicitud pendiente', `Hola ${esc(me.full_name)}. Un responsable del coro tiene que aceptar tu registro. Vuelve a entrar más tarde.`); return; }
     if(me.status === 'rejected'){ renderMsg('Acceso no autorizado', 'Tu solicitud no ha sido aceptada. Habla con un responsable del coro.'); return; }
-    tab = isAdmin() ? (['hoy','cal','coro','historial','sup','avisos','yo','ajustes'].includes(tab)?tab:'hoy') : isSup() ? (['cal','sup','avisos','yo'].includes(tab)?tab:'sup') : (['cal','avisos','yo'].includes(tab)?tab:'yo');
+    tab = isAdmin() ? (['hoy','cal','coro','historial','sup','avisos','yo','cuenta','ajustes'].includes(tab)?tab:'hoy') : isSup() ? (['cal','sup','avisos','cuenta'].includes(tab)?tab:'sup') : (['cal','avisos','yo','cuenta'].includes(tab)?tab:'yo');
     loading = true; render();
     await loadAll(); await checkPush(); loading = false;
     subscribe(); render(); applyDeepLink();
@@ -280,21 +282,23 @@ function render(){
     <button data-tab="coro"><span>${ICONS.coro}${pend?`<i class="badge">${pend}</i>`:''}</span>Coro</button>
     <button data-tab="historial"><span>${ICONS.historial}</span>Historial</button>
     ${avBtn}
-    <button data-tab="yo"><span>${ICONS.yo}</span>Lo mío</button>`
-    : isSup() ? `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>${avBtn}<button data-tab="yo"><span>${ICONS.yo}</span>Mi cuenta</button>`
-    : `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>${avBtn}<button data-tab="yo"><span>${ICONS.yo}</span>Mis asistencias</button>`;
+    <button data-tab="yo"><span>${ICONS.coins}</span>Lo mío</button>`
+    : isSup() ? `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>${avBtn}<button data-tab="cuenta"><span>${ICONS.cuenta}</span>Cuenta</button>`
+    : `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>${avBtn}<button data-tab="yo"><span>${ICONS.coins}</span>Mis asistencias</button><button data-tab="cuenta"><span>${ICONS.cuenta}</span>Cuenta</button>`;
   nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab===tab));
   const os = activeSession();
   if(isAdmin() && os) document.getElementById('sub').textContent = `Quedada en curso · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
   if(loading){ document.getElementById('app').innerHTML = '<div class="empty">Cargando…</div>'; return; }
-  const views = {hoy:renderHoy, cal:renderCal, coro:renderCoro, historial:renderHistorial, sup:renderSup, avisos:renderAvisos, yo:renderYo, ajustes:renderAjustes};
+  const views = {hoy:renderHoy, cal:renderCal, coro:renderCoro, historial:renderHistorial, sup:renderSup, avisos:renderAvisos, yo:renderYo, cuenta:renderCuenta, ajustes:renderAjustes};
+  document.getElementById('userBtn').style.display = isAdmin() ? 'flex' : 'none';
+  document.getElementById('userBtn').classList.toggle('on', tab==='cuenta');
   document.getElementById('gear').style.display = isAdmin() ? 'flex' : 'none';
   document.getElementById('gear').classList.toggle('on', tab==='ajustes');
   document.getElementById('supBtn').style.display = canSee() ? 'flex' : 'none';
   document.getElementById('supBtn').classList.toggle('on', tab==='sup');
   if(isAdmin()) (views[tab]||renderHoy)();
-  else if(isSup()) ({cal:renderCal, sup:renderSup, avisos:renderAvisos, yo:renderYo}[tab]||renderSup)();
-  else ({cal:renderCal, avisos:renderAvisos, yo:renderYo}[tab]||renderYo)();
+  else if(isSup()) ({cal:renderCal, sup:renderSup, avisos:renderAvisos, cuenta:renderCuenta}[tab]||renderSup)();
+  else ({cal:renderCal, avisos:renderAvisos, yo:renderYo, cuenta:renderCuenta}[tab]||renderYo)();
 }
 
 function statusInfo(s, a){
@@ -390,7 +394,7 @@ function applyDeepLink(){
     tab = 'cal';
     if(s){ calSel = s.date; calMonth = s.date.slice(0,7); }
   } else if(h === '#avisos') tab = 'avisos';
-  else if(h === '#yo') tab = 'yo';
+  else if(h === '#yo') tab = isSup() ? 'cuenta' : 'yo';
   else if(h === '#coro' && isAdmin()) tab = 'coro';
   render(); const app = document.getElementById('app'); if(app) app.scrollTop = 0;
 }
@@ -410,7 +414,7 @@ function renderAvisos(){
     <div class="card"><h2>Avisos del coro</h2>
       ${list.length ? list.map(item).join('') : '<div class="empty">Todavía no hay avisos.</div>'}
     </div>
-    ${pushCard()}`;
+    <p class="hint" style="text-align:center">Las notificaciones de este móvil se gestionan en <a href="#" data-act="goCuenta">Cuenta</a>.</p>`;
 }
 function annCard(){
   const lim = Date.now() - 14*86400000;
@@ -783,10 +787,22 @@ function renderYo(){
   }
   const bote = D.bote.reduce((a,b)=>a+b.amount_cents,0);
   document.getElementById('app').innerHTML = upcomingCard() + body + `
-    <div class="card"><div class="row"><span class="muted">Bote común del coro</span><b style="text-align:right;color:var(--oro)">${eur(bote)}</b></div></div>
-    <div class="card"><h2>Mi cuenta</h2><p class="muted" style="margin-top:-4px">@${esc(me.username)}</p>
+    <div class="card"><div class="row"><span class="muted">Bote común del coro</span><b style="text-align:right;color:var(--oro)">${eur(bote)}</b></div></div>`;
+}
+
+/* ----- CUENTA ----- */
+function renderCuenta(){
+  const rol = isAdmin() ? 'Súper usuario' : isSup() ? 'Solo supervisión (consulta)' : 'Miembro del coro';
+  document.getElementById('app').innerHTML = `
+    <div class="card"><h2>Mi cuenta</h2>
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="width:52px;height:52px;border-radius:50%;background:var(--card2);color:var(--oro);display:flex;align-items:center;justify-content:center;flex:0 0 52px">${ICONS.cuenta.replace('<svg','<svg width="28" height="28"')}</div>
+        <div style="min-width:0"><div style="font-weight:700;font-size:17px">${esc(me.full_name)}</div><div class="muted">@${esc(me.username)} · ${rol}</div></div>
+      </div>
       <label>Cambiar mi contraseña</label><div class="row"><input id="myPass" type="password" autocomplete="new-password" placeholder="nueva contraseña"><button class="btn sm sec" style="flex:0" data-act="myPass">Cambiar</button></div>
-      <button class="btn danger" data-act="logout">Cerrar sesión</button></div>
+      <button class="btn danger" data-act="logout">Cerrar sesión</button>
+    </div>
+    ${pushCard()}
     <p class="muted" style="text-align:center">Coro San Pablo · ${VERSION}</p>`;
 }
 
@@ -932,6 +948,7 @@ async function backup(){
 const A = {
   closeSheet: () => sheet(''),
   emoji(el){ insertEmoji(el.dataset.e); },
+  goCuenta(){ tab='cuenta'; render(); document.getElementById('app').scrollTop=0; },
   mailAsk(el){ const m = member(el.dataset.id); const cur = (D.contacts||{})[m.id] || '';
     sheet(`<h2>Avisos por correo</h2><p class="muted" style="margin-top:-6px">${esc(m.name)}</p>
       <p class="hint">Para quien no puede instalar la app. Le llegarán por correo las quedadas nuevas, cambios y cancelaciones, los avisos para todo el coro y lo que le toca en cada reparto. Los recordatorios automáticos (1 h antes y por la mañana) no se envían por correo.</p>
@@ -991,7 +1008,7 @@ const A = {
   calPlan(el){ tab='hoy'; focusId=null; render(); const i=document.getElementById('nsDate'); if(i){ i.value = el.dataset.d; document.getElementById('nsPlace')?.focus(); } },
   async toggleAlarm(el){
     const id = el.dataset.id, on = D.alarms.has(id);
-    if(!on && !pushOn) return toast(pushSupport()==='ios' ? 'Primero instala la app y activa los avisos en Lo mío' : 'Primero activa los avisos en Lo mío / Mis asistencias');
+    if(!on && !pushOn) return toast(pushSupport()==='ios' ? 'Primero instala la app y activa los avisos en Cuenta' : 'Primero activa los avisos en Cuenta');
     busy(el,true);
     try{
       if(on){ await q(sb.from('session_alarms').delete().eq('session_id', id).eq('user_id', authUser.id)); D.alarms.delete(id); toast('Aviso de la mañana quitado'); }
@@ -1319,6 +1336,7 @@ function notifyAdmin(full_name, username){
 /* ---------- inicio ---------- */
 function init(){
   document.addEventListener('click', e => {
+    if(e.target.closest('#userBtn')){ tab='cuenta'; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     if(e.target.closest('#supBtn')){ tab='sup'; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     if(e.target.closest('#gear')){ tab='ajustes'; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     const n = e.target.closest('nav button'); if(n){ tab=n.dataset.tab; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
