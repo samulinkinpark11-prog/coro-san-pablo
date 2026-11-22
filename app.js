@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.10';
+const VERSION = 'v4.11';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -61,6 +61,7 @@ const ICONS = {
   hoy: IC('<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>'),
   cal: IC('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>'),
   sup: IC('<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>'),
+  bellNav: IC('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>'),
   bell: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
   coro: IC('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>'),
   historial: IC('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>'),
@@ -216,7 +217,7 @@ async function boot(){
     if(!me){ renderMsg('No se encontró tu perfil', 'Vuelve a intentarlo en un momento.' + (meErr ? `<br><small>Detalle: ${esc(meErr)}</small>` : '')); return; }
     if(me.status === 'pending'){ renderMsg('⏳ Solicitud pendiente', `Hola ${esc(me.full_name)}. Un responsable del coro tiene que aceptar tu registro. Vuelve a entrar más tarde.`); return; }
     if(me.status === 'rejected'){ renderMsg('Acceso no autorizado', 'Tu solicitud no ha sido aceptada. Habla con un responsable del coro.'); return; }
-    tab = isAdmin() ? (['hoy','cal','coro','historial','sup','yo','ajustes'].includes(tab)?tab:'hoy') : isSup() ? (['cal','sup','yo'].includes(tab)?tab:'sup') : (['cal','yo'].includes(tab)?tab:'yo');
+    tab = isAdmin() ? (['hoy','cal','coro','historial','sup','avisos','yo','ajustes'].includes(tab)?tab:'hoy') : isSup() ? (['cal','sup','avisos','yo'].includes(tab)?tab:'sup') : (['cal','avisos','yo'].includes(tab)?tab:'yo');
     loading = true; render();
     await loadAll(); await checkPush(); loading = false;
     subscribe(); render(); applyDeepLink();
@@ -268,25 +269,30 @@ function render(){
   chrome(true);
   const nav = document.querySelector('nav');
   const pend = D.profiles.filter(p=>p.status==='pending').length;
+  if(tab==='avisos') markAnnRead();
+  const unread = unreadAnn();
+  const avBtn = `<button data-tab="avisos"><span>${ICONS.bellNav}${unread?`<i class="badge">${unread}</i>`:''}</span>Avisos</button>`;
   nav.innerHTML = isAdmin() ? `
     <button data-tab="hoy"><span>${ICONS.hoy}</span>Hoy</button>
     <button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>
     <button data-tab="coro"><span>${ICONS.coro}${pend?`<i class="badge">${pend}</i>`:''}</span>Coro</button>
     <button data-tab="historial"><span>${ICONS.historial}</span>Historial</button>
-    <button data-tab="sup"><span>${ICONS.sup}</span>Supervisión</button>
+    ${avBtn}
     <button data-tab="yo"><span>${ICONS.yo}</span>Lo mío</button>`
-    : isSup() ? `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button><button data-tab="sup"><span>${ICONS.sup}</span>Supervisión</button><button data-tab="yo"><span>${ICONS.yo}</span>Mi cuenta</button>`
-    : `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button><button data-tab="yo"><span>${ICONS.yo}</span>Mis asistencias</button>`;
+    : isSup() ? `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>${avBtn}<button data-tab="yo"><span>${ICONS.yo}</span>Mi cuenta</button>`
+    : `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>${avBtn}<button data-tab="yo"><span>${ICONS.yo}</span>Mis asistencias</button>`;
   nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab===tab));
   const os = activeSession();
   if(isAdmin() && os) document.getElementById('sub').textContent = `Quedada en curso · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
   if(loading){ document.getElementById('app').innerHTML = '<div class="empty">Cargando…</div>'; return; }
-  const views = {hoy:renderHoy, cal:renderCal, coro:renderCoro, historial:renderHistorial, sup:renderSup, yo:renderYo, ajustes:renderAjustes};
+  const views = {hoy:renderHoy, cal:renderCal, coro:renderCoro, historial:renderHistorial, sup:renderSup, avisos:renderAvisos, yo:renderYo, ajustes:renderAjustes};
   document.getElementById('gear').style.display = isAdmin() ? 'flex' : 'none';
   document.getElementById('gear').classList.toggle('on', tab==='ajustes');
+  document.getElementById('supBtn').style.display = canSee() ? 'flex' : 'none';
+  document.getElementById('supBtn').classList.toggle('on', tab==='sup');
   if(isAdmin()) (views[tab]||renderHoy)();
-  else if(isSup()) ({cal:renderCal, sup:renderSup, yo:renderYo}[tab]||renderSup)();
-  else (tab==='cal' ? renderCal : renderYo)();
+  else if(isSup()) ({cal:renderCal, sup:renderSup, avisos:renderAvisos, yo:renderYo}[tab]||renderSup)();
+  else ({cal:renderCal, avisos:renderAvisos, yo:renderYo}[tab]||renderYo)();
 }
 
 function statusInfo(s, a){
@@ -381,12 +387,29 @@ function applyDeepLink(){
     const id = h.split('=')[1]; const s = id && D.sessions.find(x => x.id === id);
     tab = 'cal';
     if(s){ calSel = s.date; calMonth = s.date.slice(0,7); }
-  } else if(h === '#yo' || h === '#avisos') tab = isAdmin() || !isSup() ? 'yo' : 'cal';
+  } else if(h === '#avisos') tab = 'avisos';
+  else if(h === '#yo') tab = 'yo';
   else if(h === '#coro' && isAdmin()) tab = 'coro';
   render(); const app = document.getElementById('app'); if(app) app.scrollTop = 0;
 }
 
 /* ----- CALENDARIO ----- */
+function annSeenKey(){ return 'coro-ann-seen-' + (authUser ? authUser.id : ''); }
+function unreadAnn(){
+  let seen = 0; try{ seen = Number(localStorage.getItem(annSeenKey())) || 0; }catch(e){}
+  return (D.ann||[]).filter(x => new Date(x.created_at).getTime() > seen && x.author !== authUser.id).length;
+}
+function markAnnRead(){ try{ const last = Math.max(0, ...(D.ann||[]).map(x=>new Date(x.created_at).getTime())); if(last) localStorage.setItem(annSeenKey(), String(last)); }catch(e){} }
+function renderAvisos(){
+  const list = D.ann || [];
+  const item = x => `<div class="list-item" style="align-items:flex-start"><span style="min-width:0"><b>${esc(x.title||'Aviso del coro')}</b>${x.audience==='admins'?' <span class="tag late">solo súper</span>':''}<div style="white-space:pre-line;margin-top:4px;line-height:1.4">${esc(x.body)}</div><div class="muted" style="font-size:12px;margin-top:4px">${new Date(x.created_at).toLocaleString('es-ES',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div></span>${isAdmin()?`<button class="ic r" style="flex:0" data-act="annDel" data-id="${x.id}" aria-label="Borrar aviso">✕</button>`:''}</div>`;
+  document.getElementById('app').innerHTML = `
+    ${isAdmin()?`<button class="btn" data-act="annAsk" style="margin:0 0 12px">${ICONS.bell} Escribir un aviso</button>`:''}
+    <div class="card"><h2>Avisos del coro</h2>
+      ${list.length ? list.map(item).join('') : '<div class="empty">Todavía no hay avisos.</div>'}
+    </div>
+    ${pushCard()}`;
+}
 function annCard(){
   const lim = Date.now() - 14*86400000;
   const list = (D.ann||[]).filter(x => new Date(x.created_at).getTime() > lim).slice(0,3);
@@ -476,7 +499,7 @@ function renderCal(){
       </div>
     </div>`; }).join('')
     : `<div class="card"><p class="muted" style="margin:0">No hay quedada este día.</p>${isAdmin() && calSel>=t ? `<button class="btn sec" data-act="calPlan" data-d="${calSel}">Programar una quedada este día</button>` : ''}</div>`;
-  document.getElementById('app').innerHTML = annCard() + jmjBanner() + `
+  document.getElementById('app').innerHTML = jmjBanner() + `
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <button class="ic" style="flex:0" data-act="calMove" data-v="-1" aria-label="Mes anterior">‹</button>
@@ -625,11 +648,6 @@ function renderCoro(){
     ${pend.length?`<div class="card" style="border:2px solid var(--oro)"><h2>🔔 Solicitudes de acceso (${pend.length})</h2>
       ${pend.map(p=>`<div class="list-item"><span><b>${esc(p.full_name)}</b><br><span class="muted">@${esc(p.username)} · ${new Date(p.created_at).toLocaleDateString('es-ES')}</span></span>
         <button class="ic g" style="flex:0" data-act="userSheet" data-id="${p.id}">Revisar</button></div>`).join('')}</div>`:''}
-    <div class="card"><h2>Enviar un aviso</h2>
-      <p class="hint" style="margin-top:-4px">Mensaje libre para todo el coro (o solo para súper usuarios). Llega como notificación y queda en la app 14 días.</p>
-      <button class="btn" data-act="annAsk">${ICONS.bell} Escribir aviso</button>
-      ${(D.ann||[]).length?`<details style="margin-top:10px"><summary>Avisos enviados (${D.ann.length})</summary>${D.ann.map(x=>`<div class="list-item" style="align-items:flex-start"><span><b>${esc(x.title||'Aviso del coro')}</b>${x.audience==='admins'?' <span class="tag late">solo súper</span>':''}<div class="muted" style="white-space:pre-line">${esc(x.body)}</div><div class="muted" style="font-size:12px">${new Date(x.created_at).toLocaleString('es-ES')}</div></span><button class="ic r" style="flex:0" data-act="annDel" data-id="${x.id}" aria-label="Borrar aviso">✕</button></div>`).join('')}</details>`:''}
-    </div>
     <div class="card">
       <h2>Gente apuntada (${act.length})</h2>
       <div class="row"><input id="newName" placeholder="Nombre" autocomplete="off"><button class="btn sm" style="flex:0" data-act="addMember">Añadir</button></div>
@@ -716,7 +734,7 @@ function renderYo(){
       </div>`;
   }
   const bote = D.bote.reduce((a,b)=>a+b.amount_cents,0);
-  document.getElementById('app').innerHTML = annCard() + upcomingCard() + body + pushCard() + `
+  document.getElementById('app').innerHTML = upcomingCard() + body + `
     <div class="card"><div class="row"><span class="muted">Bote común del coro</span><b style="text-align:right;color:var(--oro)">${eur(bote)}</b></div></div>
     <div class="card"><h2>Mi cuenta</h2><p class="muted" style="margin-top:-4px">@${esc(me.username)}</p>
       <label>Cambiar mi contraseña</label><div class="row"><input id="myPass" type="password" autocomplete="new-password" placeholder="nueva contraseña"><button class="btn sm sec" style="flex:0" data-act="myPass">Cambiar</button></div>
@@ -1214,7 +1232,7 @@ function pushCard(){
   else if(st==='ios') inner = `<p class="muted" style="margin-top:0">Para recibir avisos en iPhone, primero instala la app: botón <b>Compartir</b> → <b>Añadir a pantalla de inicio</b>. Luego ábrela desde el icono y pulsa aquí.</p>`;
   else if(st==='no') inner = `<p class="muted" style="margin-top:0">Este navegador no admite avisos. Prueba con Chrome (Android) o instalando la app (iPhone).</p>`;
   else inner = `<p class="muted" style="margin-top:0">Recibe avisos de nuevas quedadas, cambios de hora o sitio, el recordatorio 1 h antes y lo que te toca en cada reparto.</p><button class="btn" data-act="enablePush">Activar avisos en este móvil</button>`;
-  return `<div class="card"><h2>Avisos</h2>${inner}</div>`;
+  return `<div class="card"><h2>Notificaciones en este móvil</h2>${inner}</div>`;
 }
 function upcomingCard(){
   const up = D.sessions.filter(s=>!s.closed && !isEnded(s)).sort((x,y)=>(x.date+x.start_time).localeCompare(y.date+y.start_time));
@@ -1239,6 +1257,7 @@ function notifyAdmin(full_name, username){
 /* ---------- inicio ---------- */
 function init(){
   document.addEventListener('click', e => {
+    if(e.target.closest('#supBtn')){ tab='sup'; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     if(e.target.closest('#gear')){ tab='ajustes'; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     const n = e.target.closest('nav button'); if(n){ tab=n.dataset.tab; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     const el = e.target.closest('[data-act]'); if(!el) return;
