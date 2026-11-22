@@ -14,7 +14,7 @@ window.CORO_CONFIG = {
     TEMPLATE_ID: 'template_a297mb7',
     PUBLIC_KEY: 'oTYwlzDkwRMIvIzhX',
     // Plantilla para enviar avisos por correo a quien no tiene la app (Para: {{to_email}}, Asunto: {{subject}}, Mensaje: {{message}})
-    TEMPLATE_AVISO: ''
+    TEMPLATE_AVISO: 'template_4tu4ntf'
   },
 
   // Clave pública para los avisos al móvil (la privada está solo en Supabase)
