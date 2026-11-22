@@ -137,6 +137,15 @@ create table if not exists public.session_checkin (
   updated_at timestamptz default now()
 );
 
+-- v4.17: un código para la llegada ('in') y otro para la salida ('out')
+alter table public.session_checkin add column if not exists kind text not null default 'in';
+do $$ begin
+  if exists (select 1 from pg_constraint where conname = 'session_checkin_pkey' and array_length(conkey, 1) = 1) then
+    alter table public.session_checkin drop constraint session_checkin_pkey;
+    alter table public.session_checkin add primary key (session_id, kind);
+  end if;
+end $$;
+
 -- ---------- FUNCIONES AUXILIARES ----------
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -173,7 +182,7 @@ begin
   if mid is null then raise exception 'Tu usuario no está asociado a ningún nombre de la lista'; end if;
   select * into s from sessions where id = p_session;
   if s is null or s.closed or not s.started or s.end_time is not null then raise exception 'Esta quedada no está en curso'; end if;
-  select * into c from session_checkin where session_id = p_session;
+  select * into c from session_checkin where session_id = p_session and kind = 'in';
   if c is null or (p_code is distinct from c.code and p_code is distinct from c.prev) or c.updated_at < now() - interval '20 seconds' then
     raise exception 'Código caducado. Escanea el QR otra vez';
   end if;
@@ -185,6 +194,28 @@ begin
   return hm;
 end $$;
 grant execute on function public.checkin(uuid, text) to authenticated;
+
+-- Fichar la salida (irse antes) escaneando el QR de salida
+create or replace function public.checkout(p_session uuid, p_code text) returns text
+language plpgsql security definer set search_path = public as $$
+declare mid uuid; s record; c record; a record; hm text;
+begin
+  mid := public.my_member();
+  if mid is null then raise exception 'Tu usuario no está asociado a ningún nombre de la lista'; end if;
+  select * into s from sessions where id = p_session;
+  if s is null or s.closed or not s.started or s.end_time is not null then raise exception 'Esta quedada no está en curso'; end if;
+  select * into c from session_checkin where session_id = p_session and kind = 'out';
+  if c is null or (p_code is distinct from c.code and p_code is distinct from c.prev) or c.updated_at < now() - interval '20 seconds' then
+    raise exception 'Código caducado. Escanea el QR otra vez';
+  end if;
+  select * into a from attendance where session_id = p_session and member_id = mid;
+  if a is null or a.status <> 'present' then raise exception 'No constas como llegado: pide que te marquen primero'; end if;
+  if a."leave" is not null then return a."leave"; end if;
+  hm := to_char(now() at time zone 'Europe/Madrid', 'HH24:MI');
+  update attendance set "leave" = hm where session_id = p_session and member_id = mid;
+  return hm;
+end $$;
+grant execute on function public.checkout(uuid, text) to authenticated;
 
 -- Recuento de «Voy / No puedo» por quedada (todos los aceptados lo ven, sin nombres)
 create or replace function public.rsvp_counts() returns table(session_id uuid, yes_count bigint, no_count bigint)

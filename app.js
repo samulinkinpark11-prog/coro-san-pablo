@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.16';
+const VERSION = 'v4.17';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -430,7 +430,7 @@ function renderHoy(){
         <div class="stat"><b>${c.left}</b><small>se fueron</small></div>
         <div class="stat"><b>${c.absent}</b><small>no vienen</small></div>
       </div>
-      ${!isEnded(s)?`<button class="btn" data-act="showQr">${IC('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>').replace('<svg','<svg width="20" height="20"')} Mostrar QR de llegada</button>`:''}
+      ${!isEnded(s)?`<button class="btn" data-act="showQr">${IC('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>').replace('<svg','<svg width="20" height="20"')} Mostrar QR (llegada / salida)</button>`:''}
       ${pend.length?`<button class="btn sec" data-act="allOnTime">✓ Marcar los ${pend.length} sin marcar como llegados a las ${esc(s.start_time)}</button>`:''}
     </div>
     <div class="card">${items || '<div class="empty">No hay nadie en la lista.</div>'}
@@ -448,6 +448,7 @@ function applyDeepLink(){
   try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){}
   sheet(''); focusId = null;
   if(h.startsWith('#llegada=')){ const [sid, code] = h.slice(9).split('.'); if(sid && code) doCheckin(sid, code); return; }
+  if(h.startsWith('#salida=')){ const [sid, code] = h.slice(8).split('.'); if(sid && code) doCheckout(sid, code); return; }
   if(h.startsWith('#cal')){
     const id = h.split('=')[1]; const s = id && D.sessions.find(x => x.id === id);
     tab = 'cal';
@@ -665,48 +666,52 @@ async function mailNotify(body){
 /* ----- LLEGADA CON CÓDIGO QR ----- */
 const QR_LIB = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
 const JSQR_LIB = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
-let qrTimer = null, qrCode = null, qrSession = null;
+let qrTimer = null, qrCode = null, qrSession = null, qrKind = 'in';
 function stopQr(){ if(qrTimer){ clearInterval(qrTimer); qrTimer = null; } }
 const randCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32]).join('');
-async function showQr(){
+async function showQr(kind){
   const s = activeSession(); if(!s) return;
   try{ await loadScript(QR_LIB, 'qrcode'); }catch(e){ return toast('📴 Sin cobertura: no se puede mostrar el QR'); }
+  stopQr(); kind = kind === 'out' ? 'out' : 'in'; qrKind = kind;
   qrSession = s.id; qrCode = null;
-  sheet(`<h2>QR de llegada</h2><p class="muted" style="margin-top:-6px">${fmtDate(s.date)} · ${esc(s.start_time)}${s.place?' · '+esc(s.place):''}</p>
+  const sal = kind === 'out';
+  sheet(`<div class="seg" style="margin-bottom:12px"><button class="${sal?'':'on'}" data-act="showQr" data-v="in">Llegada</button><button class="${sal?'on':''}" data-act="showQr" data-v="out">Salida</button></div>
+    <h2>QR de ${sal?'salida':'llegada'}</h2><p class="muted" style="margin-top:-6px">${fmtDate(s.date)} · ${esc(s.start_time)}${s.place?' · '+esc(s.place):''}</p>
     <div id="qrBox" style="background:#fff;border-radius:18px;padding:14px;margin:8px auto;max-width:300px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;color:#13213F">Generando…</div>
     <div style="height:6px;border-radius:3px;background:var(--card2);overflow:hidden;max-width:300px;margin:0 auto"><div id="qrBar" style="height:100%;width:100%;background:var(--oro)"></div></div>
     <p id="qrInfo" class="hint" style="text-align:center">El código cambia cada 5 segundos.</p>
-    <p class="hint">Cada uno lo escanea <b>desde la app</b>: <b>Mis asistencias → Escanear QR de llegada</b>. Se le marcará la llegada con la hora exacta. A quien no tenga la app, márcalo tú a mano en la lista.</p>
+    <p class="hint">${sal ? 'Para quien <b>se va antes</b>: lo escanea desde <b>Mis asistencias → Escanear QR de salida</b> y se le apunta la hora de salida exacta. Al terminar la quedada no hace falta: el resto se cierra solo.' : 'Cada uno lo escanea <b>desde la app</b>: <b>Mis asistencias → Escanear QR de llegada</b>. Se le marcará la llegada con la hora exacta.'} A quien no tenga la app, márcalo tú a mano en la lista.</p>
     <button class="btn sec" data-act="closeSheet">Cerrar</button>`);
   let busyTick = false;
   const tick = async () => {
-    const box = document.getElementById('qrBox'); if(!box){ stopQr(); return; }
+    const box = document.getElementById('qrBox'); if(!box || qrKind !== kind){ return; }
     if(busyTick) return; busyTick = true;
     const prev = qrCode, code = randCode();
-    const { error } = await sb.from('session_checkin').upsert({session_id: s.id, code, prev, updated_at: new Date().toISOString()});
+    const { error } = await sb.from('session_checkin').upsert({session_id: s.id, kind, code, prev, updated_at: new Date().toISOString()}, {onConflict: 'session_id,kind'});
     if(error){ busyTick = false; document.getElementById('qrInfo').innerHTML = isNetErr(error) ? '📴 Sin cobertura: el QR no funcionará hasta que vuelva la conexión.' : '⚠️ ' + esc(traducir(error.message)); if(qrCode) return; }
     else { qrCode = code; document.getElementById('qrInfo').textContent = 'El código cambia cada 5 segundos.'; }
     busyTick = false;
     const bar = document.getElementById('qrBar'); if(bar){ bar.style.transition = 'none'; bar.style.width = '100%'; void bar.offsetWidth; bar.style.transition = 'width 5s linear'; bar.style.width = '0%'; }
-    const url = location.origin + location.pathname + '#llegada=' + s.id + '.' + (qrCode || code);
+    const url = location.origin + location.pathname + (sal ? '#salida=' : '#llegada=') + s.id + '.' + (qrCode || code);
     const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
     box.innerHTML = qr.createSvgTag({cellSize: 6, margin: 0, scalable: true}).replace('<svg ', '<svg style="width:100%;height:100%" ');
   };
-  await tick(); stopQr(); qrTimer = setInterval(tick, 5000);
+  await tick(); stopQr(); if(qrKind === kind && document.getElementById('qrBox')) qrTimer = setInterval(tick, 5000);
 }
 
 let scanStream = null, scanRaf = null;
 function stopScan(){ if(scanRaf){ cancelAnimationFrame(scanRaf); scanRaf = null; } if(scanStream){ scanStream.getTracks().forEach(t => t.stop()); scanStream = null; } }
-async function startScan(){
-  if(!navigator.onLine) return toast('📴 Necesitas cobertura para fichar la llegada');
+async function startScan(kind){
+  const sal = kind === 'out';
+  if(!navigator.onLine) return toast('📴 Necesitas cobertura para fichar la ' + (sal ? 'salida' : 'llegada'));
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return toast('Este móvil no deja usar la cámara desde la app. Pide que te marquen a mano.');
   try{ await loadScript(JSQR_LIB, 'jsQR'); }catch(e){ return toast('📴 Sin cobertura: no se puede abrir el escáner'); }
-  sheet(`<h2>Escanear QR de llegada</h2>
+  sheet(`<h2>Escanear QR de ${sal ? 'salida' : 'llegada'}</h2>
     <div style="position:relative;border-radius:18px;overflow:hidden;background:#000;aspect-ratio:1;max-width:340px;margin:0 auto">
       <video id="scanV" playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
       <div style="position:absolute;inset:18%;border:3px solid var(--oro);border-radius:16px"></div>
     </div>
-    <p id="scanInfo" class="hint" style="text-align:center">Apunta al QR que enseña el responsable.</p>
+    <p id="scanInfo" class="hint" style="text-align:center">Apunta al QR de ${sal ? 'salida' : 'llegada'} que enseña el responsable.</p>
     <canvas id="scanC" hidden></canvas>
     <button class="btn sec" data-act="closeSheet">Cancelar</button>`);
   try{
@@ -720,8 +725,12 @@ async function startScan(){
       const w = 480, h = Math.round(v.videoHeight * w / v.videoWidth); c.width = w; c.height = h;
       ctx.drawImage(v, 0, 0, w, h);
       const res = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, {inversionAttempts:'dontInvert'});
-      const m = res && res.data && res.data.match(/#llegada=([0-9a-f-]{36})\.([A-Z0-9]{4,12})/i);
-      if(m){ stopScan(); doCheckin(m[1], m[2]); return; }
+      const m = res && res.data && res.data.match(/#(llegada|salida)=([0-9a-f-]{36})\.([A-Z0-9]{4,12})/i);
+      if(m){
+        const esSal = m[1].toLowerCase() === 'salida';
+        if(esSal === sal){ stopScan(); (sal ? doCheckout : doCheckin)(m[2], m[3]); return; }
+        const inf = document.getElementById('scanInfo'); if(inf) inf.innerHTML = `⚠️ Ese es el QR de <b>${esSal ? 'salida' : 'llegada'}</b>. Pide el de ${sal ? 'salida' : 'llegada'}.`;
+      }
     }
     scanRaf = requestAnimationFrame(loop);
   };
@@ -738,6 +747,20 @@ async function doCheckin(sid, code){
     render(); scheduleReload();
   }catch(e){
     sheet(`<h2>No se pudo fichar</h2><p class="muted">${esc(isNetErr(e) ? 'Sin cobertura. Inténtalo de nuevo en un momento.' : traducir(e.message))}</p><button class="btn" data-act="scanQr">Volver a escanear</button><button class="btn sec" data-act="closeSheet">Cerrar</button>`);
+  }
+}
+
+async function doCheckout(sid, code){
+  sheet(`<h2>Fichando la salida…</h2><p class="muted">Un momento.</p>`);
+  try{
+    const { data, error } = await sb.rpc('checkout', {p_session: sid, p_code: code});
+    if(error) throw error;
+    const a = me.member_id && attGet(sid, me.member_id);
+    if(a) a.leave = data;
+    sheet(`<div style="text-align:center;padding:10px 0"><div style="font-size:54px">👋</div><h2>Salida registrada</h2><p class="muted">A las <b style="color:var(--oro)">${esc(data)}</b>. ¡Gracias por venir!</p><button class="btn" data-act="closeSheet">Hecho</button></div>`);
+    render(); scheduleReload();
+  }catch(e){
+    sheet(`<h2>No se pudo fichar la salida</h2><p class="muted">${esc(isNetErr(e) ? 'Sin cobertura. Inténtalo de nuevo en un momento.' : traducir(e.message))}</p><button class="btn" data-act="scanQr" data-v="out">Volver a escanear</button><button class="btn sec" data-act="closeSheet">Cerrar</button>`);
   }
 }
 
@@ -911,7 +934,8 @@ function renderYo(){
     let hoy = '';
     if(open){ const a = attGet(open.id, mid); const yaEsta = a && a.status==='present';
       hoy = `<div class="card" style="border:2px solid var(--oro)"><b>Quedada en curso · ${fmtDate(open.date)} ${esc(open.start_time)}</b><div class="det" style="margin-top:6px">${statusInfo(open,a).txt}</div>
-        ${!yaEsta && !open.end_time ? `<button class="btn" data-act="scanQr">📷 Escanear QR de llegada</button><p class="hint">Pide al responsable que te enseñe el QR.</p>` : ''}</div>`; }
+        ${!yaEsta && !open.end_time ? `<button class="btn" data-act="scanQr">📷 Escanear QR de llegada</button><p class="hint">Pide al responsable que te enseñe el QR.</p>` : ''}
+        ${yaEsta && !a.leave && !open.end_time ? `<button class="btn sec" data-act="scanQr" data-v="out">📷 Me voy: escanear QR de salida</button>` : ''}</div>`; }
     body = `${hoy}
       <div class="tiles">
         <div class="tile"><div class="l">Llevas ganado</div><div class="v g">${eur(total)}</div></div>
@@ -1088,8 +1112,8 @@ async function backup(){
 const A = {
   closeSheet: () => sheet(''),
   emoji(el){ insertEmoji(el.dataset.e); },
-  showQr(){ showQr(); },
-  scanQr(){ startScan(); },
+  showQr(el){ showQr(el && el.dataset.v); },
+  scanQr(el){ startScan(el && el.dataset.v); },
   goCuenta(){ tab='cuenta'; render(); document.getElementById('app').scrollTop=0; },
   mailAsk(el){ const m = member(el.dataset.id); const cur = (D.contacts||{})[m.id] || '';
     sheet(`<h2>Avisos por correo</h2><p class="muted" style="margin-top:-6px">${esc(m.name)}</p>
