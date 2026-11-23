@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.17';
+const VERSION = 'v4.18';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -484,6 +484,13 @@ function annCard(){
     ${list.map(x=>`<div class="list-item" style="align-items:flex-start"><span><b>${esc(x.title||'Aviso del coro')}</b>${x.audience==='admins'?' <span class="tag late">solo súper</span>':''}<div style="white-space:pre-line;margin-top:4px;line-height:1.4">${esc(x.body)}</div><div class="muted" style="font-size:12px;margin-top:4px">${new Date(x.created_at).toLocaleString('es-ES',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div></span></div>`).join('')}
   </div>`;
 }
+function seulMsg(){
+  const mid = me && me.member_id; if(!mid || isSup()) return '';
+  const total = D.att.filter(a => a.member_id === mid && (D.sessions.find(s=>s.id===a.session_id)||{}).closed).reduce((t,a)=>t+(a.amount_cents||0), 0);
+  return `<div class="seul">${total > 0
+    ? `Llevas ganado en el Coro <b>${eur(total)}</b>. ¡Ya te queda menos para ir a Seúl! ✈️`
+    : `Cada quedada te acerca un poco más a Seúl. ¡Vamos! ✈️`}</div>`;
+}
 function jmjBanner(){
   const start = new Date(2027, 7, 3), end = new Date(2027, 7, 8, 23, 59);
   const now = new Date(); const dias = Math.ceil((start - new Date(now.toDateString()))/86400000);
@@ -565,7 +572,7 @@ function renderCal(){
       </div>
     </div>`; }).join('')
     : `<div class="card"><p class="muted" style="margin:0">No hay quedada este día.</p>${isAdmin() && calSel>=t ? `<button class="btn sec" data-act="calPlan" data-d="${calSel}">Programar una quedada este día</button>` : ''}</div>`;
-  document.getElementById('app').innerHTML = jmjBanner() + `
+  document.getElementById('app').innerHTML = jmjBanner() + seulMsg() + `
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <button class="ic" style="flex:0" data-act="calMove" data-v="-1" aria-label="Mes anterior">‹</button>
@@ -1014,11 +1021,91 @@ function editSheet(mid){
     <button class="btn danger" data-act="removeFromSession" data-id="${mid}">Quitar de la lista de hoy</button>`);
 }
 
+/* ----- CONTAR BILLETES Y MONEDAS / CÓMO REPARTIR EL DINERO ----- */
+const DENOMS = [50000,20000,10000,5000,2000,1000,500,200,100,50,20,10,5,2,1];
+const denomTxt = c => c >= 100 ? (c/100) + ' €' : c + ' cts';
+const cashTotal = cash => DENOMS.reduce((t,d)=>t + d*(Number((cash||{})[d])||0), 0);
+function cashGrid(cash){
+  const cell = d => `<label class="cash-c"><span>${d>=500?'💶':'🪙'} ${denomTxt(d)}</span><input type="number" min="0" inputmode="numeric" data-den="${d}" value="${(cash||{})[d]||''}" placeholder="0"></label>`;
+  return `<div class="cash-h">Billetes</div><div class="cash">${DENOMS.filter(d=>d>=500).map(cell).join('')}</div>
+    <div class="cash-h">Monedas</div><div class="cash">${DENOMS.filter(d=>d<500).map(cell).join('')}</div>`;
+}
+function readCash(root){
+  const c = {}; root.querySelectorAll('[data-den]').forEach(i => { const n = Math.max(0, Math.floor(Number(i.value)||0)); if(n) c[i.dataset.den] = n; });
+  return c;
+}
+// Busca con qué billetes y monedas pagar «amount» usando las menos piezas posibles del «stock» disponible
+function payWith(amount, stock){
+  const items = [];
+  DENOMS.forEach(d => { let n = Math.min(stock[d]||0, Math.floor(amount/d)), k = 1; while(n > 0){ const t = Math.min(k, n); items.push([d, t]); n -= t; k *= 2; } });
+  const INF = 1e9, dp = new Int32Array(amount+1).fill(INF); dp[0] = 0;
+  const take = items.map(() => new Uint8Array(amount+1));
+  items.forEach(([d,k], i) => { const v = d*k; for(let x = amount; x >= v; x--){ const c = dp[x-v] + k; if(c < dp[x]){ dp[x] = c; take[i][x] = 1; } } });
+  let best = amount; while(best > 0 && dp[best] >= INF) best--;
+  const got = {}; let x = best;
+  for(let i = items.length-1; i >= 0 && x > 0; i--){ if(take[i][x]){ const [d,k] = items[i]; got[d] = (got[d]||0) + k; x -= d*k; } }
+  return { got, paid: best };
+}
+function planCash(s){
+  const people = attOf(s.id).filter(a => a.amount_cents > 0).map(a => ({name: member(a.member_id)?.name || '?', cents: a.amount_cents}));
+  const run = order => {
+    const stock = {...s.cash}; Object.keys(stock).forEach(k => stock[k] = Number(stock[k]));
+    const out = order.map(p => { const r = payWith(p.cents, stock); Object.entries(r.got).forEach(([d,n]) => stock[d] -= n); return {...p, got: r.got, falta: p.cents - r.paid}; });
+    return { out, stock, falta: out.reduce((t,p)=>t+p.falta,0) };
+  };
+  // Reparto equilibrado: cada billete/moneda va a quien más le queda por cobrar (así nadie se lleva solo calderilla);
+  // los últimos 2 € de cada uno se cuadran al final buscando la combinación exacta.
+  const fair = () => {
+    const stock = {...s.cash}; Object.keys(stock).forEach(k => stock[k] = Number(stock[k]));
+    const ps = people.map(p => ({...p, got:{}, rest:p.cents})), RES = 200;
+    DENOMS.forEach(d => { while((stock[d]||0) > 0){
+      const p = ps.filter(x => x.rest === d || x.rest >= d + RES).sort((a,b)=>b.rest-a.rest)[0]; if(!p) break;
+      p.got[d] = (p.got[d]||0) + 1; p.rest -= d; stock[d]--; } });
+    [...ps].sort((a,b)=>b.rest-a.rest).forEach(p => { if(!p.rest) return; const r = payWith(p.rest, stock);
+      Object.entries(r.got).forEach(([d,n]) => { stock[d] -= n; p.got[d] = (p.got[d]||0) + n; }); p.rest -= r.paid; });
+    const out = ps.map(p => ({name:p.name, cents:p.cents, got:p.got, falta:p.rest}));
+    return { out, stock, falta: out.reduce((t,p)=>t+p.falta,0) };
+  };
+  const desc = [...people].sort((a,b)=>b.cents-a.cents || a.name.localeCompare(b.name,'es'));
+  let best = fair();
+  if(best.falta){ const alt = run(desc); if(alt.falta < best.falta) best = alt; }
+  if(best.falta){ const asc = run([...desc].reverse()); if(asc.falta < best.falta) best = asc; }
+  best.out.sort((a,b)=>a.name.localeCompare(b.name,'es'));
+  return best;
+}
+const piezas = got => DENOMS.filter(d => got[d]).map(d => `<span class="pz">${got[d]} × ${denomTxt(d)}</span>`).join(' ');
+function cashPlanSheet(id){
+  const s = D.sessions.find(x=>x.id===id); if(!s || !s.cash) return;
+  const p = planCash(s), queda = cashTotal(p.stock);
+  sheet(`<h2>Cómo repartir el dinero</h2><p class="muted" style="margin-top:-6px">${fmtDate(s.date)} · contado ${eur(cashTotal(s.cash))}</p>
+    ${p.falta ? `<p class="hint" style="color:var(--bad)">⚠️ No hay cambio suficiente para cuadrarlo exacto: faltan ${eur(p.falta)} en monedas o billetes pequeños. Cambiad algún billete y volved a contar, o dadlo después.</p>` : `<p class="hint">Así sale exacto. Prepara un sobre por persona:</p>`}
+    ${p.out.map(x => `<div class="list-item" style="display:block"><div class="row" style="justify-content:space-between"><b>${esc(x.name)}</b><b style="color:var(--oro)">${eur(x.cents)}</b></div>
+      <div class="pzs">${piezas(x.got) || '<span class="muted">—</span>'}</div>${x.falta?`<div class="hint" style="color:var(--bad);margin:4px 0 0">Le faltan ${eur(x.falta)}</div>`:''}</div>`).join('')}
+    <div class="list-item" style="display:block;border:1px dashed var(--oro)"><div class="row" style="justify-content:space-between"><b>Se queda en la caja</b><b>${eur(queda)}</b></div>
+      <div class="hint" style="margin:2px 0 6px">Gastos ${eur(s.gastos_cents)} + bote común ${eur(s.sobrante_cents)}${p.falta?` + lo que falta por dar ${eur(p.falta)}`:''}</div>
+      <div class="pzs">${piezas(p.stock) || '<span class="muted">—</span>'}</div></div>
+    <button class="btn sec" data-act="cashCount" data-id="${s.id}">Corregir el recuento</button>
+    <button class="btn sec" data-act="viewSession" data-id="${s.id}">Volver</button>`);
+}
+function cashCountSheet(id){
+  const s = D.sessions.find(x=>x.id===id); if(!s) return;
+  sheet(`<h2>Contar billetes y monedas</h2><p class="muted" style="margin-top:-6px">${fmtDate(s.date)} · botín ${eur(s.botin_cents)}</p>
+    <div id="cashBox">${cashGrid(s.cash)}</div><p id="cashSum" class="hint"></p>
+    <button class="btn oro" data-act="cashSave" data-id="${s.id}">Guardar y ver el reparto</button>
+    <button class="btn sec" data-act="viewSession" data-id="${s.id}">Volver</button>`);
+  const box = document.getElementById('cashBox');
+  const upd = () => { const t = cashTotal(readCash(box)), d = t - s.botin_cents;
+    document.getElementById('cashSum').innerHTML = `Total contado: <b>${eur(t)}</b>${d ? ` · <span style="color:var(--bad)">${d>0?'sobran':'faltan'} ${eur(Math.abs(d))} respecto al botín</span>` : ' · ✅ cuadra con el botín'}`; };
+  box.oninput = upd; upd();
+}
+
 function closeSheet(){
   const s = openSession();
   sheet(`<h2>Introducir botín y repartir</h2>
     <label>Hora de fin</label><input type="time" id="cEnd" value="${esc(s.end_time||nowHM())}">
     <label>Botín del día (€)</label><input id="cBotin" inputmode="decimal" placeholder="0,00" autocomplete="off">
+    <button class="btn sec sm" data-act="cashToggle">🪙 Contar billetes y monedas</button>
+    <div id="cashBox" hidden>${cashGrid(s.cash)}<p class="hint">El botín se rellena solo con lo que vas contando. Al cerrar, la app te dirá qué billetes y monedas darle a cada uno.</p></div>
     <label>Gastos del día (€)</label><input id="cGastos" inputmode="decimal" placeholder="0,00" autocomplete="off">
     <div id="cPrev" style="margin-top:12px"></div>
     <button class="btn oro" data-act="confirmClose">Guardar y cerrar quedada</button>
@@ -1027,7 +1114,11 @@ function closeSheet(){
     const r = calc(s, attOf(s.id), val('cEnd') || nowHM(), toCents(val('cBotin')), toCents(val('cGastos')));
     document.getElementById('cPrev').innerHTML = resultTable(r, true);
   };
-  ['cEnd','cBotin','cGastos'].forEach(i => document.getElementById(i).oninput = upd); upd();
+  ['cEnd','cBotin','cGastos'].forEach(i => document.getElementById(i).oninput = upd);
+  const box = document.getElementById('cashBox');
+  box.oninput = () => { const t = cashTotal(readCash(box)); document.getElementById('cBotin').value = t ? (t/100).toFixed(2).replace('.', ',') : ''; upd(); };
+  if(s.cash && cashTotal(s.cash)){ box.hidden = false; box.oninput(); }
+  upd();
 }
 
 function resultTable(r, preview){
@@ -1066,6 +1157,7 @@ function viewSession(id){
   const s = D.sessions.find(x=>x.id===id); if(!s) return;
   sheet(`<h2>${fmtDate(s.date)} · ${esc(s.start_time)}–${esc(s.end_time)}</h2>
     ${resultTable(storedResult(s))}
+    ${s.cash && cashTotal(s.cash) === s.botin_cents ? `<button class="btn oro" data-act="cashPlan" data-id="${id}">💶 Cómo repartir el dinero</button>` : `<button class="btn sec" data-act="cashCount" data-id="${id}">🪙 Contar billetes y monedas para repartir</button>`}
     <button class="btn" data-act="share" data-id="${id}">📤 Compartir (WhatsApp…)</button>
     <button class="btn sec" data-act="reopen" data-id="${id}">Reabrir para corregir</button>
     <button class="btn danger" data-act="delSession" data-id="${id}">Borrar esta quedada</button>`);
@@ -1334,6 +1426,7 @@ const A = {
   },
   async confirmClose(el){
     const s=openSession(); const end=val('cEnd')||nowHM(); const botin=toCents(val('cBotin')); const gastos=toCents(val('cGastos'));
+    const cb = document.getElementById('cashBox'); let cash = cb ? readCash(cb) : null; if(!cash || !cashTotal(cash) || cashTotal(cash) !== botin) cash = null;
     if(!botin && !confirm('No has puesto el botín. ¿Cerrar igualmente con 0 €?')) return;
     if(gastos > botin && !confirm('Los gastos son mayores que el botín: no se repartirá nada. ¿Seguir?')) return;
     const r = calc(s, attOf(s.id), end, botin, gastos);
@@ -1345,13 +1438,22 @@ const A = {
       await q(sb.from('bote').delete().eq('session_id', s.id));
       if(r.sobrante > 0) await q(sb.from('bote').insert({amount_cents:r.sobrante, note:`Sobrante del redondeo · ${fmtDate(s.date)}`, session_id:s.id}));
       await q(sb.from('sessions').update({closed:true, end_time:end, botin_cents:botin, gastos_cents:gastos, repartido_cents:r.repartido, sobrante_cents:r.sobrante,
-        duration_min:r.dur, mode:S().mode, tolerance:S().tolerance, step_cents:S().step}).eq('id', s.id));
+        duration_min:r.dur, mode:S().mode, tolerance:S().tolerance, step_cents:S().step, cash}).eq('id', s.id));
       await loadAll(); await backup();
-      focusId = null; tab='historial'; render(); viewSession(s.id); toast('Quedada guardada y copia hecha ✅');
+      focusId = null; tab='historial'; render(); if(cash) cashPlanSheet(s.id); else viewSession(s.id); toast('Quedada guardada y copia hecha ✅');
       notify({type:'payout', session_id:s.id});
     }catch(e){ busy(el,false); }
   },
   viewSession(el){ viewSession(el.dataset.id); },
+  cashToggle(){ const b = document.getElementById('cashBox'); b.hidden = !b.hidden; if(!b.hidden){ const i = b.querySelector('input'); if(i) i.focus(); } },
+  cashPlan(el){ cashPlanSheet(el.dataset.id); },
+  cashCount(el){ cashCountSheet(el.dataset.id); },
+  async cashSave(el){
+    const s = D.sessions.find(x=>x.id===el.dataset.id); const cash = readCash(document.getElementById('cashBox')); const t = cashTotal(cash);
+    if(t !== s.botin_cents) return toast(`El recuento (${eur(t)}) no cuadra con el botín (${eur(s.botin_cents)})`);
+    busy(el,true);
+    try{ await q(sb.from('sessions').update({cash}).eq('id', s.id)); s.cash = cash; cashPlanSheet(s.id); }catch(e){ busy(el,false); }
+  },
   async share(el){
     const s=D.sessions.find(x=>x.id===el.dataset.id); const t=shareText(s);
     if(navigator.share){ try{ await navigator.share({text:t}); return; }catch(e){ if(e.name==='AbortError') return; } }

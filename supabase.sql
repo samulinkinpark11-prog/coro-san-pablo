@@ -82,6 +82,7 @@ update public.sessions set started = true where started is null;              --
 alter table public.sessions alter column started set default false;
 alter table public.sessions alter column started set not null;
 alter table public.sessions add column if not exists reminded boolean not null default false;  -- recordatorio de 1 h enviado
+alter table public.sessions add column if not exists cash jsonb;            -- recuento de billetes y monedas (céntimos → cantidad)
 alter table public.attendance add column if not exists notified_cents int;   -- última cantidad avisada (para reajustes)
 
 create table if not exists public.push_subscriptions (
