@@ -125,6 +125,13 @@ details summary{cursor:pointer;padding:4px 0;color:var(--sub)}
 .emo-row{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:2px}
 .emo-row button{border:0;background:none;font-size:24px;line-height:1;min-height:44px;border-radius:10px;padding:0}
 .emo-row button:active{background:var(--line2)}
+.song .stz{margin-top:14px}.song .lab{font-size:12px;font-weight:700;color:var(--sub);margin-bottom:2px}
+.song .ln{display:flex;flex-wrap:wrap;align-items:flex-end;line-height:1.25}.song .w{display:inline-flex;flex-wrap:nowrap}
+.song .sg{display:inline-flex;flex-direction:column;white-space:pre}.song .sg .c{color:var(--oro);font-weight:700;font-size:13.5px;min-height:17px;padding-right:6px}
+.song .sg .t{font-size:16px}.song .ln.nochord .sg .c{display:none}.song .red .t{color:#FF8A80;font-weight:600}
+.song .bis{font-size:12px;font-weight:700;color:var(--sub);margin-left:8px;padding-bottom:2px}.song .snote{font-size:14px;color:var(--sub);background:var(--card2);border-radius:10px;padding:6px 10px;margin:4px 0}
+.smeta{display:flex;flex-wrap:wrap;gap:6px;margin:-4px 0 2px}.stag{background:var(--card2);border-radius:8px;padding:3px 9px;font-size:13px;font-weight:600;color:var(--sub)}.stag.k{color:var(--oro)}
+label.busy{opacity:.6;pointer-events:none}
 .seul{background:linear-gradient(135deg,rgba(242,193,78,.18),rgba(242,193,78,.05));border:1px solid rgba(242,193,78,.45);border-radius:16px;padding:11px 14px;margin:-4px 0 12px;font-size:15px;line-height:1.35}.seul b{color:var(--oro)}
 .cash-h{font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--sub);margin:12px 0 6px}
 .cash{display:grid;grid-template-columns:1fr 1fr;gap:8px}.cash-c{display:flex;align-items:center;gap:8px;background:var(--card2);border-radius:12px;padding:6px 8px 6px 10px;margin:0}
@@ -160,6 +167,6 @@ nav button{font-size:10px}
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js?v=8"></script>
-<script src="app.js?v=31"></script>
+<script src="app.js?v=32"></script>
 </body>
 </html>

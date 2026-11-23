@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.18';
+const VERSION = 'v4.19';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -61,6 +61,7 @@ const S = () => D.settings;
 const IC = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const ICONS = {
   hoy: IC('<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>'),
+  music: IC('<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>'),
   cal: IC('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>'),
   coins: IC('<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>'),
   sup: IC('<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>'),
@@ -212,7 +213,7 @@ async function loadAll(){
     Object.assign(D, {members, sessions, att, profiles, bote});
     D.contacts = {}; try{ const { data } = await sb.from('member_contacts').select('*'); (data||[]).forEach(r => D.contacts[r.member_id] = r.email); }catch(e){}
     D.pushN = {}; try{ const { data } = await sb.rpc('push_counts'); (data||[]).forEach(r => D.pushN[r.user_id] = Number(r.n)); }catch(e){}
-    await Promise.all([loadAlarms(), loadRsvp(), loadAnn()]);
+    await Promise.all([loadAlarms(), loadRsvp(), loadAnn(), loadSongs()]);
     D.lastBackup = bk && bk[0] ? bk[0].created_at : null;
   } else {
     const [members, sessions, att, bote] = await Promise.all([
@@ -222,9 +223,12 @@ async function loadAll(){
       q(isSup() ? sb.from('bote').select('*').order('created_at',{ascending:false}) : sb.from('bote').select('amount_cents'))
     ]);
     Object.assign(D, {members, sessions, att, bote, profiles:[]});
-    await Promise.all([loadAlarms(), loadRsvp(), loadAnn()]);
+    await Promise.all([loadAlarms(), loadRsvp(), loadAnn(), loadSongs()]);
   }
   offline = false; updateNetBanner(); saveCache();
+}
+async function loadSongs(){
+  try{ const { data, error } = await sb.from('songs').select('*').order('position').order('title'); if(!error && data) D.songs = data; }catch(e){}
 }
 async function loadAnn(){
   D.ann = [];
@@ -339,14 +343,15 @@ function render(){
     <button data-tab="coro"><span>${ICONS.coro}${pend?`<i class="badge">${pend}</i>`:''}</span>Coro</button>
     <button data-tab="historial"><span>${ICONS.historial}</span>Historial</button>
     ${avBtn}
+    <button data-tab="canciones"><span>${ICONS.music}</span>Canciones</button>
     <button data-tab="yo"><span>${ICONS.coins}</span>Lo mío</button>`
-    : isSup() ? `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>${avBtn}<button data-tab="cuenta"><span>${ICONS.cuenta}</span>Cuenta</button>`
-    : `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>${avBtn}<button data-tab="yo"><span>${ICONS.coins}</span>Mis asistencias</button><button data-tab="cuenta"><span>${ICONS.cuenta}</span>Cuenta</button>`;
+    : isSup() ? `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>${avBtn}<button data-tab="canciones"><span>${ICONS.music}</span>Canciones</button><button data-tab="cuenta"><span>${ICONS.cuenta}</span>Cuenta</button>`
+    : `<button data-tab="cal"><span>${ICONS.cal}</span>Calendario</button>${avBtn}<button data-tab="canciones"><span>${ICONS.music}</span>Canciones</button><button data-tab="yo"><span>${ICONS.coins}</span>Mis asistencias</button><button data-tab="cuenta"><span>${ICONS.cuenta}</span>Cuenta</button>`;
   nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab===tab));
   const os = activeSession();
   if(isAdmin() && os) document.getElementById('sub').textContent = `Quedada en curso · ${fmtDate(os.date)} · ${os.start_time}${os.place?' · '+os.place:''}`;
   if(loading){ document.getElementById('app').innerHTML = '<div class="empty">Cargando…</div>'; return; }
-  const views = {hoy:renderHoy, cal:renderCal, coro:renderCoro, historial:renderHistorial, sup:renderSup, avisos:renderAvisos, yo:renderYo, cuenta:renderCuenta, ajustes:renderAjustes};
+  const views = {hoy:renderHoy, cal:renderCal, coro:renderCoro, historial:renderHistorial, sup:renderSup, avisos:renderAvisos, yo:renderYo, cuenta:renderCuenta, ajustes:renderAjustes, canciones:renderCanciones};
   document.getElementById('userBtn').style.display = isAdmin() ? 'flex' : 'none';
   document.getElementById('userBtn').classList.toggle('on', tab==='cuenta');
   document.getElementById('gear').style.display = isAdmin() ? 'flex' : 'none';
@@ -354,8 +359,8 @@ function render(){
   document.getElementById('supBtn').style.display = canSee() ? 'flex' : 'none';
   document.getElementById('supBtn').classList.toggle('on', tab==='sup');
   if(isAdmin()) (views[tab]||renderHoy)();
-  else if(isSup()) ({cal:renderCal, sup:renderSup, avisos:renderAvisos, cuenta:renderCuenta}[tab]||renderSup)();
-  else ({cal:renderCal, avisos:renderAvisos, yo:renderYo, cuenta:renderCuenta}[tab]||renderYo)();
+  else if(isSup()) ({cal:renderCal, sup:renderSup, avisos:renderAvisos, cuenta:renderCuenta, canciones:renderCanciones}[tab]||renderSup)();
+  else ({cal:renderCal, avisos:renderAvisos, yo:renderYo, cuenta:renderCuenta, canciones:renderCanciones}[tab]||renderYo)();
 }
 
 function statusInfo(s, a){
@@ -466,6 +471,118 @@ function unreadAnn(){
   return (D.ann||[]).filter(x => new Date(x.created_at).getTime() > seen && x.author !== authUser.id).length;
 }
 function markAnnRead(){ try{ const last = Math.max(0, ...(D.ann||[]).map(x=>new Date(x.created_at).getTime())); if(last) localStorage.setItem(annSeenKey(), String(last)); }catch(e){} }
+/* ----- CANCIONES (repertorio con acordes + PDF privado) ----- */
+const SONG_BUCKET = 'repertorio';
+const fileUrls = {};  // ruta → {url, exp}
+const urlOf = p => { const u = p && fileUrls[p]; return u && u.exp > Date.now() ? u.url : null; };
+async function signFiles(paths){
+  paths = [...new Set(paths.filter(p => p && !urlOf(p)))]; if(!paths.length || !navigator.onLine) return false;
+  try{ const { data, error } = await sb.storage.from(SONG_BUCKET).createSignedUrls(paths, 3600);
+    if(error || !data) return false;
+    data.forEach(d => { if(d.signedUrl) fileUrls[d.path] = {url: d.signedUrl, exp: Date.now() + 50*60*1000}; }); return true;
+  }catch(e){ return false; }
+}
+function chordLine(txt, red){
+  const parts = txt.split(/(\[[^\]]+\])/).filter(x => x !== '');
+  const segs = []; let ch = '';
+  parts.forEach(p => { if(/^\[.+\]$/.test(p)){ if(ch) segs.push([ch, '']); ch = p.slice(1,-1); } else { segs.push([ch, p]); ch = ''; } });
+  if(ch) segs.push([ch, '']);
+  const has = segs.some(x => x[0]); let bis = '';
+  const sg = (c,t) => `<span class="sg"><span class="c">${esc(c)}</span><span class="t">${esc(t) || '&nbsp;'}</span></span>`;
+  const pcs = [];
+  segs.forEach(([c,t]) => { const m = t.match(/^(.*?)\s*\(bis\)\s*$/i); if(m){ t = m[1]; bis = '<span class="bis">BIS</span>'; }
+    const w = t.match(/\S*\s*/g).filter(Boolean); if(!w.length) w.push('');
+    w.forEach((x,i) => pcs.push([i ? '' : c, x])); });
+  let html = '', word = '';
+  pcs.forEach(([c,t], i) => { word += sg(c,t); if(/\s$/.test(t) || i === pcs.length-1){ html += `<span class="w">${word}</span>`; word = ''; } });
+  return `<div class="ln${has?'':' nochord'}${red?' red':''}">${html}${bis}</div>`;
+}
+// Formato: estrofas separadas por una línea en blanco; «# Título» encabeza una estrofa («#! Título» la pone en rojo);
+// [ACORDE] antes de la sílaba; «(bis)» al final del verso; «> texto» es una nota.
+function songHtml(body){
+  return String(body||'').replace(/\r/g,'').split(/\n\s*\n/).map(st => {
+    let lines = st.split('\n').filter(l => l.trim() !== ''); if(!lines.length) return '';
+    let lab = '', red = false;
+    if(/^#/.test(lines[0])){ const h = lines.shift(); red = /^#!/.test(h); lab = h.replace(/^#!?\s*/, ''); }
+    return `<div class="stz">${lab?`<div class="lab">${esc(lab)}</div>`:''}${lines.map(l => /^>/.test(l) ? `<div class="snote">${esc(l.replace(/^>\s*/, ''))}</div>` : chordLine(l, red)).join('')}</div>`;
+  }).join('');
+}
+function renderCanciones(){
+  const songs = D.songs || [], cn = S().cancionero;
+  const need = [cn && cn.path, ...songs.map(x => x.file_path)].filter(p => p && !urlOf(p));
+  if(need.length) signFiles(need).then(ok => { if(ok && tab === 'canciones') render(); });
+  const pdfBtn = (p, label, cls) => { const u = urlOf(p); return u ? `<a class="btn ${cls||''}" href="${esc(u)}" target="_blank" rel="noopener">${label}</a>` : `<button class="btn ${cls||''}" disabled>${navigator.onLine ? 'Preparando el PDF…' : '📴 El PDF necesita cobertura'}</button>`; };
+  document.getElementById('app').innerHTML = `
+    <div class="card"><h2>Cancionero</h2>
+      ${cn && cn.path ? `${pdfBtn(cn.path, '📄 Abrir el cancionero completo (PDF)', 'oro')}<p class="hint">Actualizado el ${fmtDate((cn.at||'').slice(0,10))}.</p>` : `<p class="muted">Aún no se ha subido el PDF del cancionero.</p>`}
+      ${isAdmin() ? `<label class="btn sec" style="text-align:center">${cn && cn.path ? 'Cambiar el PDF del cancionero' : '⬆️ Subir el PDF del cancionero'}<input type="file" accept="application/pdf,image/*" data-up="cancionero" hidden></label>
+        <p class="hint">Se guarda en una carpeta privada: solo lo ve quien entra en la app.</p>` : ''}
+    </div>
+    <div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Canciones</h2>${isAdmin()?`<button class="btn sec sm" style="width:auto;margin:0" data-act="songEdit">＋ Nueva</button>`:''}</div>
+      ${songs.length ? songs.map((x,i) => `<div class="list-item" data-act="songOpen" data-id="${x.id}" style="cursor:pointer"><span><b>${i+1}. ${esc(x.title)}</b>${x.tono||x.notes?`<br><span class="det" style="font-size:13px">${[x.tono?'Tono: '+esc(x.tono):'', esc(x.notes||'')].filter(Boolean).join(' · ')}</span>`:''}</span><span class="muted">${x.file_path?'📄 ':''}›</span></div>`).join('')
+        : `<div class="empty">${navigator.onLine ? 'Aún no hay canciones.' : 'Sin cobertura.'}</div>`}
+    </div>`;
+}
+function songOpen(id){
+  const x = (D.songs||[]).find(s => s.id === id); if(!x) return;
+  const fileBtn = () => { if(!x.file_path) return ''; const u = urlOf(x.file_path);
+    return u ? `<a class="btn sec" href="${esc(u)}" target="_blank" rel="noopener">📄 Hoja original</a>` : `<button class="btn sec" disabled>📄 Hoja original (cargando…)</button>`; };
+  const draw = () => sheet(`<h2>${esc(x.title)}</h2>
+    ${x.tono||x.notes ? `<div class="smeta">${x.tono?`<span class="stag k">Tono: ${esc(x.tono)}</span>`:''}${x.notes?`<span class="stag">${esc(x.notes)}</span>`:''}</div>` : ''}
+    <div class="song">${songHtml(x.body) || '<p class="muted">Sin letra todavía.</p>'}</div>
+    ${fileBtn()}
+    ${isAdmin() ? `<button class="btn sec" data-act="songEdit" data-id="${x.id}">Editar</button>` : ''}
+    <button class="btn sec" data-act="closeSheet">Cerrar</button>`);
+  draw();
+  if(x.file_path && !urlOf(x.file_path)) signFiles([x.file_path]).then(ok => { if(ok && document.querySelector('.sheet .song')) draw(); });
+}
+function songEdit(id){
+  const x = (D.songs||[]).find(s => s.id === id) || {title:'', tono:'', notes:'', body:'', position: ((D.songs||[]).reduce((m,s)=>Math.max(m, s.position||0), 0) + 10)};
+  sheet(`<h2>${id ? 'Editar canción' : 'Nueva canción'}</h2>
+    <label>Título</label><input id="sgT" value="${esc(x.title)}" autocomplete="off">
+    <div class="row" style="gap:8px"><div style="flex:1"><label>Tono</label><input id="sgK" value="${esc(x.tono||'')}" placeholder="LA" autocomplete="off"></div>
+      <div style="flex:0 0 90px"><label>Orden</label><input id="sgP" type="number" inputmode="numeric" value="${x.position||0}"></div></div>
+    <label>Notas (cejilla, quién empieza…)</label><input id="sgN" value="${esc(x.notes||'')}" autocomplete="off">
+    <label>Letra</label><textarea id="sgB" rows="14" style="font-size:15px;line-height:1.4" placeholder="Pega aquí la letra">${esc(x.body||'')}</textarea>
+    <p class="hint">Deja una línea en blanco entre estrofas. Acordes entre corchetes justo antes de la sílaba: <b>[LA]Campana sobre [MI7]campana</b>. Una línea que empiece por <b>#</b> pone título a la estrofa (<b>#!</b> la pone en rojo). Añade <b>(bis)</b> al final del verso que se repite.</p>
+    <div id="sgPrev"></div>
+    ${id ? `<label class="btn sec" style="text-align:center">${x.file_path ? 'Cambiar la hoja original (PDF o foto)' : '⬆️ Subir la hoja original (PDF o foto)'}<input type="file" accept="application/pdf,image/*" data-up="song" data-id="${id}" hidden></label>` : ''}
+    <button class="btn oro" data-act="songSave" data-id="${id||''}">Guardar</button>
+    ${id ? `<button class="btn danger" data-act="songDel" data-id="${id}">Borrar canción</button>` : ''}
+    <button class="btn sec" data-act="${id?'songOpen':'closeSheet'}" data-id="${id||''}">Cancelar</button>`);
+  const b = document.getElementById('sgB'), pv = document.getElementById('sgPrev');
+  const upd = () => { pv.innerHTML = b.value.trim() ? `<label>Así se verá</label><div class="song" style="background:var(--card2);border-radius:14px;padding:4px 12px 12px">${songHtml(b.value)}</div>` : ''; };
+  b.oninput = upd; upd();
+}
+async function uploadSongFile(input){
+  const f = input.files && input.files[0]; if(!f) return;
+  if(f.size > 45*1024*1024) return toast('El archivo es demasiado grande (máx. 45 MB)');
+  if(!navigator.onLine) return toast('📴 Necesitas cobertura para subir archivos');
+  const ext = (f.name.split('.').pop() || 'pdf').toLowerCase().replace(/[^a-z0-9]/g,'') || 'pdf';
+  const kind = input.dataset.up, id = input.dataset.id;
+  const path = kind === 'cancionero' ? `cancionero-${Date.now()}.${ext}` : `canciones/${id}-${Date.now()}.${ext}`;
+  const lab = input.closest('label'); if(lab){ lab.classList.add('busy'); lab.firstChild.textContent = 'Subiendo… '; }
+  try{
+    const { error } = await sb.storage.from(SONG_BUCKET).upload(path, f, {contentType: f.type || 'application/pdf', upsert: true});
+    if(error) throw error;
+    if(kind === 'cancionero'){
+      const old = S().cancionero && S().cancionero.path;
+      D.settings.cancionero = {path, name: f.name, at: new Date().toISOString()};
+      await q(sb.from('settings').upsert({id:1, data:S()}));
+      if(old) sb.storage.from(SONG_BUCKET).remove([old]).catch(()=>{});
+      toast('Cancionero subido ✅'); render();
+    } else {
+      const x = D.songs.find(s => s.id === id); const old = x.file_path;
+      await q(sb.from('songs').update({file_path: path, updated_at: new Date().toISOString()}).eq('id', id));
+      x.file_path = path; if(old) sb.storage.from(SONG_BUCKET).remove([old]).catch(()=>{});
+      toast('Hoja original subida ✅'); render(); songOpen(id);
+    }
+  }catch(e){
+    toast('⚠️ No se pudo subir: ' + traducir(e.message || '') + (/bucket|not found|policy|row-level/i.test(e.message||'') ? ' (¿has vuelto a ejecutar el SQL?)' : ''));
+    if(lab){ lab.classList.remove('busy'); render(); }
+  }
+}
+
 function renderAvisos(){
   const list = D.ann || [];
   const item = x => `<div class="list-item" style="align-items:flex-start"><span style="min-width:0"><b>${esc(x.title||'Aviso del coro')}</b>${x.audience==='admins'?' <span class="tag late">solo súper</span>':''}<div style="white-space:pre-line;margin-top:4px;line-height:1.4">${esc(x.body)}</div><div class="muted" style="font-size:12px;margin-top:4px">${new Date(x.created_at).toLocaleString('es-ES',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div></span>${isAdmin()?`<button class="ic r" style="flex:0" data-act="annDel" data-id="${x.id}" aria-label="Borrar aviso">✕</button>`:''}</div>`;
@@ -1445,6 +1562,25 @@ const A = {
     }catch(e){ busy(el,false); }
   },
   viewSession(el){ viewSession(el.dataset.id); },
+  songOpen(el){ songOpen(el.dataset.id); },
+  songEdit(el){ songEdit(el && el.dataset.id); },
+  async songSave(el){
+    const id = el.dataset.id, title = val('sgT').trim(); if(!title) return toast('Ponle un título');
+    const row = {title, tono: val('sgK').trim() || null, notes: val('sgN').trim() || null, body: val('sgB'), position: Number(val('sgP'))||0, updated_at: new Date().toISOString()};
+    busy(el,true);
+    try{
+      if(id){ await q(sb.from('songs').update(row).eq('id', id)); Object.assign(D.songs.find(s=>s.id===id), row); }
+      else { const d = await q(sb.from('songs').insert(row).select().single()); D.songs.push(d); }
+      D.songs.sort((a,b) => (a.position-b.position) || a.title.localeCompare(b.title,'es'));
+      saveCache(); render(); toast('Canción guardada ✅');
+      const s = id ? id : (D.songs.find(x=>x.title===title)||{}).id; if(s) songOpen(s); else sheet('');
+    }catch(e){ busy(el,false); }
+  },
+  async songDel(el){
+    const x = D.songs.find(s=>s.id===el.dataset.id); if(!x || !confirm(`¿Borrar «${x.title}»?`)) return;
+    try{ await q(sb.from('songs').delete().eq('id', x.id)); if(x.file_path) sb.storage.from(SONG_BUCKET).remove([x.file_path]).catch(()=>{});
+      D.songs = D.songs.filter(s=>s.id!==x.id); saveCache(); sheet(''); render(); toast('Canción borrada'); }catch(e){}
+  },
   cashToggle(){ const b = document.getElementById('cashBox'); b.hidden = !b.hidden; if(!b.hidden){ const i = b.querySelector('input'); if(i) i.focus(); } },
   cashPlan(el){ cashPlanSheet(el.dataset.id); },
   cashCount(el){ cashCountSheet(el.dataset.id); },
@@ -1601,6 +1737,7 @@ function notifyAdmin(full_name, username){
 
 /* ---------- inicio ---------- */
 function init(){
+  document.addEventListener('change', e => { if(e.target.matches && e.target.matches('input[data-up]')) uploadSongFile(e.target); });
   document.addEventListener('click', e => {
     if(e.target.closest('#userBtn')){ tab='cuenta'; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
     if(e.target.closest('#supBtn')){ tab='sup'; focusId=null; sheet(''); render(); document.getElementById('app').scrollTop=0; return; }
