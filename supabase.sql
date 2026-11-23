@@ -147,6 +147,14 @@ do $$ begin
   end if;
 end $$;
 
+-- v4.20: memoria de los avisos programados (p. ej. último recordatorio a quien no ha contestado)
+create table if not exists public.cron_state (
+  key text primary key,
+  value text,
+  updated_at timestamptz default now()
+);
+alter table public.cron_state enable row level security;   -- sin políticas: solo la función de avisos la usa
+
 -- ---------- FUNCIONES AUXILIARES ----------
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as $$

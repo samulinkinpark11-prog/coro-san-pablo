@@ -118,6 +118,43 @@ async function morningAlarms(now) {
   return sent;
 }
 
+// Recordatorio a quien no ha dicho si va (Voy / No puedo) a las próximas quedadas.
+// Por defecto cada 2 días a las 17:00 (se cambia en Ajustes). force = enviarlo ya desde la app.
+async function rsvpNudge(now, force = false) {
+  const day = now.slice(0, 10), nowMin = toMin(now.slice(11));
+  const { data: st } = await db.from('settings').select('data').eq('id', 1).maybeSingle();
+  const cfg = Object.assign({ every: 2, at: '17:00' }, (st && st.data && st.data.nudge) || {});
+  if (!force) {
+    if (!Number(cfg.every)) return 0;                                   // desactivado
+    const at = toMin(cfg.at || '17:00');
+    if (nowMin < at || nowMin >= at + 30) return 0;                    // solo en la media hora de las 17:00
+    const { data: last } = await db.from('cron_state').select('value').eq('key', 'rsvp_nudge').maybeSingle();
+    if (last && last.value) {
+      const days = Math.round((Date.parse(day + 'T12:00:00Z') - Date.parse(last.value + 'T12:00:00Z')) / 86400000);
+      if (days < Number(cfg.every)) return 0;
+    }
+  }
+  const limit = new Date(Date.parse(day + 'T12:00:00Z') + 14 * 86400000).toISOString().slice(0, 10);
+  const { data: ss0 } = await db.from('sessions').select('*').eq('closed', false).gte('date', day).lte('date', limit).order('date').order('start_time');
+  const ss = (ss0 || []).filter((s) => !s.started && !s.end_time && (s.date > day || toMin(s.start_time) > nowMin));
+  if (!ss.length) return 0;                                            // sin quedadas próximas: no se gasta el turno
+  const { data: profs } = await db.from('profiles').select('id, is_supervisor').eq('status', 'approved').not('member_id', 'is', null);
+  const users = (profs || []).filter((p) => !p.is_supervisor).map((p) => p.id);
+  const { data: rs } = await db.from('session_rsvp').select('session_id, user_id').in('session_id', ss.map((s) => s.id));
+  const answered = new Set((rs || []).map((r) => r.session_id + '|' + r.user_id));
+  let sent = 0;
+  for (const u of users) {
+    const pend = ss.filter((s) => !answered.has(s.id + '|' + u));
+    if (!pend.length) continue;
+    const msg = pend.length === 1
+      ? { title: '🙋 ¿Vienes a la quedada?', body: `Aún no has dicho si vas el ${when(pend[0])}${where(pend[0])}. Entra y pulsa «Voy» o «No puedo».`, tag: 'quedada-' + pend[0].id }
+      : { title: `🙋 Tienes ${pend.length} quedadas sin contestar`, body: pend.slice(0, 4).map((s) => `• ${fmtDate(s.date)} a las ${s.start_time}`).join('\n') + '\nEntra y pulsa «Voy» o «No puedo» en cada una.', tag: 'quedada-' + pend[0].id };
+    sent += await push([u], msg);
+  }
+  if (!force) await db.from('cron_state').upsert({ key: 'rsvp_nudge', value: day, updated_at: new Date().toISOString() });
+  return sent;
+}
+
 async function reminders() {
   const now = madridNow();
   const { data: ss } = await db.from('sessions').select('*').eq('closed', false).eq('reminded', false);
@@ -134,6 +171,7 @@ async function reminders() {
     }
   }
   sent += await morningAlarms(now);
+  sent += await rsvpNudge(now);
   return sent;
 }
 
@@ -179,6 +217,11 @@ Deno.serve(async (req) => {
       return json({ ok: true, sent: await push(await approvedIds(an.audience === 'admins'), {
         title: '📣 ' + (an.title || 'Aviso del coro'), body: an.body, tag: 'aviso-' + an.id
       }) });
+    }
+
+    if (type === 'rsvp_nudge') {
+      if (!me.is_admin || me.status !== 'approved') return json({ error: 'solo súper usuarios' }, 403);
+      return json({ ok: true, sent: await rsvpNudge(madridNow(), true) });
     }
 
     if (type === 'session_cancelled') {

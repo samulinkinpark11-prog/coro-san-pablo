@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.18';
+const VERSION = 'v4.20';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -985,6 +985,11 @@ function renderAjustes(){
       <label>Hora de quedada habitual</label><input type="time" id="sStart" value="${esc(st.start)}">
       <label>Hora del aviso de la mañana</label><input type="time" id="sMorning" value="${esc(st.morning||'09:00')}">
       <p class="hint">A quien pulse «Recordármelo por la mañana» en el calendario le llega un aviso a esta hora el día de la quedada (si la quedada es muy temprano, hora y media antes).</p>
+      <label>Recordar a quien no ha contestado «Voy / No puedo»</label>
+      <div class="row" style="gap:8px"><select id="sNudgeEvery" style="flex:1">${[[0,'No recordar'],[1,'Cada día'],[2,'Cada 2 días'],[3,'Cada 3 días'],[7,'Una vez por semana']].map(([v,t])=>`<option value="${v}" ${Number(nudgeCfg().every)===v?'selected':''}>${t}</option>`).join('')}</select>
+        <input type="time" id="sNudgeAt" value="${esc(nudgeCfg().at)}" style="flex:0 0 120px"></div>
+      <p class="hint">Les llega un aviso al móvil solo a los que aún no han contestado a alguna quedada de las próximas 2 semanas. Los que ya han contestado no reciben nada.</p>
+      <button class="btn sec sm" data-act="nudgeNow">🙋 Recordárselo ahora</button>
       <label>Sitio habitual (opcional)</label><input id="sPlace" value="${esc(st.place||'')}" placeholder="Se propone al crear cada quedada" autocomplete="off">
       <label>Margen de cortesía (minutos)</label><input type="number" inputmode="numeric" min="0" id="sTol" value="${st.tolerance}">
       <p class="hint">Si alguien llega con menos de este retraso (o se va con menos de esta antelación), cuenta como si hubiera estado todo el rato.</p>
@@ -1445,6 +1450,12 @@ const A = {
     }catch(e){ busy(el,false); }
   },
   viewSession(el){ viewSession(el.dataset.id); },
+  async nudgeNow(el){
+    const n = D.sessions.filter(s => !s.closed && !s.started && !s.end_time && s.date >= today()).length;
+    if(!n) return toast('No hay quedadas próximas programadas');
+    if(!confirm('¿Mandar ahora el recordatorio a quien no ha contestado a las próximas quedadas?')) return;
+    busy(el,true); try{ await notify({type:'rsvp_nudge'}); }finally{ busy(el,false); }
+  },
   cashToggle(){ const b = document.getElementById('cashBox'); b.hidden = !b.hidden; if(!b.hidden){ const i = b.querySelector('input'); if(i) i.focus(); } },
   cashPlan(el){ cashPlanSheet(el.dataset.id); },
   cashCount(el){ cashCountSheet(el.dataset.id); },
@@ -1526,8 +1537,11 @@ const A = {
   }
 };
 
+function nudgeCfg(){ return Object.assign({every:2, at:'17:00'}, S().nudge || {}); }
 function readSettings(){
   const st=S();
+  const nE=document.getElementById('sNudgeEvery'), nA=document.getElementById('sNudgeAt');
+  if(nE) st.nudge = {every:Number(nE.value)||0, at:(nA && nA.value) || '17:00'};
   const sS=document.getElementById('sStart'), sT=document.getElementById('sTol'), sP=document.getElementById('sStep');
   if(sS && sS.value) st.start=sS.value;
   const sPl=document.getElementById('sPlace'); if(sPl) st.place=sPl.value.trim();
