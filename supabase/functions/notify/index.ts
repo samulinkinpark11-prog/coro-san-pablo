@@ -72,17 +72,26 @@ async function push(userIds, msg) {
 }
 
 // Correo (EmailJS) a los que tienen email apuntado en «Coro» (los que no pueden instalar la app)
-async function mailContacts(subject, message) {
-  const E = { service: Deno.env.get('EMAILJS_SERVICE_ID'), template: Deno.env.get('EMAILJS_TEMPLATE_ID'),
-    pub: Deno.env.get('EMAILJS_PUBLIC_KEY'), priv: Deno.env.get('EMAILJS_PRIVATE_KEY') };
-  if (!E.service || !E.template || !E.pub || !E.priv) return 0;
+const mailReady = () => ['EMAILJS_SERVICE_ID', 'EMAILJS_TEMPLATE_ID', 'EMAILJS_PUBLIC_KEY', 'EMAILJS_PRIVATE_KEY'].every((k) => Deno.env.get(k));
+// Personas con email apuntado: [{member_id, email, name}]
+async function contacts() {
+  if (!mailReady()) return [];
   const { data: cs } = await db.from('member_contacts').select('member_id, email');
-  if (!cs || !cs.length) return 0;
+  if (!cs || !cs.length) return [];
   const { data: ms } = await db.from('members').select('id, name, active').in('id', cs.map((c) => c.member_id));
   const byId = Object.fromEntries((ms || []).map((m) => [m.id, m]));
+  return cs.filter((c) => c.email && byId[c.member_id] && byId[c.member_id].active !== false).map((c) => ({ ...c, name: byId[c.member_id].name }));
+}
+async function mailContacts(subject, message) {
+  return mailEach((await contacts()).map((c) => ({ ...c, subject, message })));
+}
+async function mailEach(list) {
+  if (!list.length || !mailReady()) return 0;
+  const E = { service: Deno.env.get('EMAILJS_SERVICE_ID'), template: Deno.env.get('EMAILJS_TEMPLATE_ID'),
+    pub: Deno.env.get('EMAILJS_PUBLIC_KEY'), priv: Deno.env.get('EMAILJS_PRIVATE_KEY') };
   let ok = 0;
-  for (const c of cs) {
-    const m = byId[c.member_id]; if (!m || m.active === false || !c.email) continue;
+  for (const c of list) {
+    const m = { name: c.name }, subject = c.subject, message = c.message;
     try {
       const r = await fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ service_id: E.service, template_id: E.template, user_id: E.pub, accessToken: E.priv,
@@ -170,7 +179,7 @@ async function rsvpNudge(now, force = false) {
   const { data: ss0 } = await db.from('sessions').select('*').eq('closed', false).gte('date', day).lte('date', limit).order('date').order('start_time');
   const ss = (ss0 || []).filter((s) => !s.started && !s.end_time && (s.date > day || toMin(s.start_time) > nowMin));
   if (!ss.length) return 0;                                            // sin quedadas próximas: no se gasta el turno
-  const { data: profs } = await db.from('profiles').select('id, is_supervisor').eq('status', 'approved').not('member_id', 'is', null);
+  const { data: profs } = await db.from('profiles').select('id, is_supervisor, member_id').eq('status', 'approved').not('member_id', 'is', null);
   const users = (profs || []).filter((p) => !p.is_supervisor).map((p) => p.id);
   const { data: rs } = await db.from('session_rsvp').select('session_id, user_id').in('session_id', ss.map((s) => s.id));
   const answered = new Set((rs || []).map((r) => r.session_id + '|' + r.user_id));
@@ -183,6 +192,20 @@ async function rsvpNudge(now, force = false) {
       : { title: `🙋 Tienes ${pend.length} quedadas sin contestar`, body: pend.slice(0, 4).map((s) => `• ${fmtDate(s.date)} a las ${s.start_time}`).join('\n') + '\nEntra y pulsa «Voy» o «No puedo» en cada una.', tag: 'quedada-' + pend[0].id };
     sent += await push([u], msg);
   }
+  // También por correo a quien tiene email apuntado (y no ha contestado con ninguno de sus usuarios)
+  const cs = await contacts();
+  const mails = [];
+  for (const c of cs) {
+    const us = (profs || []).filter((p) => !p.is_supervisor && p.member_id === c.member_id).map((p) => p.id);
+    if (!us.length) continue;
+    const pend = ss.filter((s) => !us.some((u) => answered.has(s.id + '|' + u)));
+    if (!pend.length) continue;
+    mails.push({ ...c,
+      subject: pend.length === 1 ? '🙋 ¿Vienes a la quedada del coro?' : `🙋 Tienes ${pend.length} quedadas del coro sin contestar`,
+      message: (pend.length === 1 ? `Aún no has dicho si vas el ${when(pend[0])}${where(pend[0])}.` : 'Aún no has dicho si vas a estas quedadas:\n' + pend.slice(0, 6).map((s) => `• ${fmtDate(s.date)} a las ${s.start_time}${s.place ? ' (' + s.place + ')' : ''}`).join('\n'))
+        + `\n\nEntra en la app (${APP_URL}#cal=${pend[0].id}) y pulsa «Voy» o «No puedo» en el Calendario.` });
+  }
+  sent += await mailEach(mails);
   if (!force) await db.from('cron_state').upsert({ key: 'rsvp_nudge', value: day, updated_at: new Date().toISOString() });
   return sent;
 }
