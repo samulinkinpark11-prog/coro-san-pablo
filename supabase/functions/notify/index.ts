@@ -4,6 +4,8 @@
 //  Secretos necesarios (Edge Functions → Secrets):
 //    VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, CRON_SECRET
 //  Opcionales: VAPID_SUBJECT, APP_URL, SERVICE_KEY
+//  Para mandar también los recordatorios por correo (EmailJS):
+//    EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, EMAILJS_PUBLIC_KEY, EMAILJS_PRIVATE_KEY
 // =====================================================================
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
@@ -69,6 +71,35 @@ async function push(userIds, msg) {
   return sent;
 }
 
+// Correo (EmailJS) a los que tienen email apuntado en «Coro» (los que no pueden instalar la app)
+async function mailContacts(subject, message) {
+  const E = { service: Deno.env.get('EMAILJS_SERVICE_ID'), template: Deno.env.get('EMAILJS_TEMPLATE_ID'),
+    pub: Deno.env.get('EMAILJS_PUBLIC_KEY'), priv: Deno.env.get('EMAILJS_PRIVATE_KEY') };
+  if (!E.service || !E.template || !E.pub || !E.priv) return 0;
+  const { data: cs } = await db.from('member_contacts').select('member_id, email');
+  if (!cs || !cs.length) return 0;
+  const { data: ms } = await db.from('members').select('id, name, active').in('id', cs.map((c) => c.member_id));
+  const byId = Object.fromEntries((ms || []).map((m) => [m.id, m]));
+  let ok = 0;
+  for (const c of cs) {
+    const m = byId[c.member_id]; if (!m || m.active === false || !c.email) continue;
+    try {
+      const r = await fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service_id: E.service, template_id: E.template, user_id: E.pub, accessToken: E.priv,
+          template_params: { to_email: c.email, to_name: m.name, subject, message, app_url: APP_URL } }) });
+      if (r.ok) ok++; else console.error('emailjs', r.status, await r.text());
+    } catch (e) { console.error('emailjs', e); }
+  }
+  return ok;
+}
+// Para no mandar dos veces el mismo correo
+async function once(key) {
+  const { data, error } = await db.from('cron_state').select('key').eq('key', key).maybeSingle();
+  if (error || data) return false;
+  const { error: e2 } = await db.from('cron_state').insert({ key, value: new Date().toISOString().slice(0, 10), updated_at: new Date().toISOString() });
+  return !e2;   // si otra ejecución lo apuntó a la vez, la clave duplicada falla y no se repite
+}
+
 /* ---------- tipos de aviso ---------- */
 async function payout(session) {
   const { data: att } = await db.from('attendance').select('*').eq('session_id', session.id);
@@ -105,6 +136,7 @@ async function morningAlarms(now) {
     let at = toMin(morning);
     if (toMin(s.start_time) - at < 60) at = Math.max(0, toMin(s.start_time) - 90);   // quedada muy temprano
     if (nowMin < at || nowMin >= toMin(s.start_time)) continue;
+    if (await once('mail-manana-' + s.id)) sent += await mailContacts('🔔 Hoy hay quedada del coro', `Hoy a las ${s.start_time}${s.place ? ' en ' + s.place : ''}. ¡Te esperamos!`);
     const { data: al } = await db.from('session_alarms').select('user_id').eq('session_id', s.id).eq('sent', false);
     const users = (al || []).map((x) => x.user_id);
     if (!users.length) continue;
@@ -168,6 +200,7 @@ async function reminders() {
         tag: 'recordatorio-' + s.id
       });
       await db.from('sessions').update({ reminded: true }).eq('id', s.id);
+      sent += await mailContacts('⏰ En 1 hora: quedada del coro', `Hoy a las ${s.start_time}${s.place ? ' en ' + s.place : ''}. ¡No llegues tarde!`);
     }
   }
   sent += await morningAlarms(now);
