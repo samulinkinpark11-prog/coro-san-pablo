@@ -145,10 +145,14 @@ async function morningAlarms(now) {
     let at = toMin(morning);
     if (toMin(s.start_time) - at < 60) at = Math.max(0, toMin(s.start_time) - 90);   // quedada muy temprano
     if (nowMin < at || nowMin >= toMin(s.start_time)) continue;
-    if (await once('mail-manana-' + s.id)) sent += await mailContacts('🔔 Hoy hay quedada del coro', `Hoy a las ${s.start_time}${s.place ? ' en ' + s.place : ''}. ¡Te esperamos!`);
     const { data: al } = await db.from('session_alarms').select('user_id').eq('session_id', s.id).eq('sent', false);
     const users = (al || []).map((x) => x.user_id);
     if (!users.length) continue;
+    // Por correo, a los que lo pidieron y tienen email apuntado (igual que en el móvil)
+    const { data: pf } = await db.from('profiles').select('member_id').in('id', users).not('member_id', 'is', null);
+    const mids = new Set((pf || []).map((p) => p.member_id));
+    const cs = (await contacts()).filter((c) => mids.has(c.member_id));
+    if (cs.length) sent += await mailEach(cs.map((c) => ({ ...c, subject: '🔔 Hoy hay quedada del coro', message: `Hoy a las ${s.start_time}${s.place ? ' en ' + s.place : ''}. ¡Te esperamos!` })));
     sent += await push(users, {
       title: '🔔 Hoy hay quedada del coro',
       body: `A las ${s.start_time}${s.place ? ' en ' + s.place : ''}.`,
