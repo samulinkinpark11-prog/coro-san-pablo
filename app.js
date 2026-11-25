@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.22';
+const VERSION = 'v4.23';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -1459,7 +1459,7 @@ const A = {
   viewSession(el){ viewSession(el.dataset.id); },
   async wxNow(el){
     busy(el,true);
-    try{ const d = await notify({type:'weather_check'}, true); toast(d && d.sent ? '🌤️ Te he mandado el tiempo de hoy al móvil' : (d ? 'Hoy no hay quedada (o no tienes los avisos activados)' : 'No se pudo consultar')); }
+    try{ const d = await notify({type:'weather_check'}); if(d) toast(d.sent ? '🌤️ Te he mandado el tiempo de hoy al móvil' : 'Hoy no hay quedada en curso o programada (o no tienes los avisos activados en este móvil)'); }
     finally{ busy(el,false); }
   },
   async nudgeNow(el){
