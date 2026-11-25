@@ -260,7 +260,7 @@ async function forecast(day) {
 async function weatherCheck(now, force = false, onlyUser = null) {
   const day = now.slice(0, 10), nowMin = toMin(now.slice(11));
   const { data: st } = await db.from('settings').select('data').eq('id', 1).maybeSingle();
-  const cfg = Object.assign({ on: true, at: '08:00', prob: 70, hours: 3 }, (st && st.data && st.data.weather) || {});
+  const cfg = Object.assign({ on: true, at: '08:00', prob: 80, hours: 3 }, (st && st.data && st.data.weather) || {});
   if (!force && (!cfg.on || nowMin < toMin(cfg.at) || nowMin >= toMin(cfg.at) + 30)) return 0;
   const { data: ss0 } = await db.from('sessions').select('*').eq('closed', false).eq('date', day).order('start_time');
   const ss = (ss0 || []).filter((s) => !s.end_time);
@@ -281,15 +281,20 @@ async function weatherCheck(now, force = false, onlyUser = null) {
     const pk = win.reduce((m, x) => x.prob > m.prob ? x : m, win[0]).src;
     const fuentes = `\nEn la peor hora: ${[pk.ae != null ? 'AEMET ' + pk.ae + '%' : '', pk.om != null ? 'Open-Meteo ' + pk.om + '%' : '', pk.mod != null ? 'modelos con lluvia ' + pk.modN : ''].filter(Boolean).join(' · ')}.\nFuentes: ${sources.join(', ')}.`;
     const tramo = `${s.start_time}–${String(Math.floor(b / 60) % 24).padStart(2, '0')}:${String(b % 60).padStart(2, '0')}`;
+    const intens = (x) => x.mm >= 4 ? 'fuerte' : (x.mm >= 1 ? 'moderada' : 'débil');
+    const hasta = (x) => { const m = toMin(x.t.slice(11)) + 60; return String(Math.floor(m / 60) % 24).padStart(2, '0') + ':00'; };
+    const coinc = (x) => [x.src.ae != null && x.src.ae >= 50 ? 'AEMET' : '', x.src.mod != null ? `${x.src.modN.split('/')[0]} de ${x.src.modN.split('/')[1]} modelos` : ''].filter(Boolean).join(' y ');
+    const tramos = rainy.map((x) => `${x.t.slice(11, 16)}–${hasta(x)} lluvia ${intens(x)}${x.code >= 95 ? ' con tormenta' : ''}`).join('\n');
     if (rainy.length) {
-      const desde = rainy[0].t.slice(11, 16);
-      sent += await push(to, { title: `🌧️ Lluvia prevista en la quedada de hoy (${s.start_time})`,
-        body: `Hasta ${maxP}% de probabilidad desde las ${desde}, ${mm.toFixed(1)} mm en el tramo ${tramo}${gust >= 50 ? ` y rachas de ${Math.round(gust)} km/h` : ''}. Decidid si se sale; si se suspende, mandad un aviso.\n${det}${fuentes}`,
+      const peor = rainy.reduce((m, x) => x.prob > m.prob ? x : m, rainy[0]);
+      const todo = rainy.length === win.length;
+      sent += await push(to, { title: `🌧️ SÍ va a llover en la quedada de hoy (${s.start_time})`,
+        body: `${todo ? 'Lluvia durante todo el tramo' : `Lluvia de ${rainy[0].t.slice(11, 16)} a ${hasta(rainy[rainy.length - 1])}`} (${tramo}).\n${tramos}${gust >= 50 ? `\nRachas de ${Math.round(gust)} km/h.` : ''}\nLo ven: ${coinc(peor)}.\nDecidid si se sale; si se suspende, mandad un aviso.`,
         tag: 'tiempo-' + s.id });
     } else if (gust >= 60) {
-      sent += await push(to, { title: `💨 Mucho viento en la quedada de hoy (${s.start_time})`, body: `Rachas de hasta ${Math.round(gust)} km/h en el tramo ${tramo}.\n${det}${fuentes}`, tag: 'tiempo-' + s.id });
+      sent += await push(to, { title: `💨 No llueve, pero hace mucho viento (${s.start_time})`, body: `Rachas de hasta ${Math.round(gust)} km/h en el tramo ${tramo}.`, tag: 'tiempo-' + s.id });
     } else if (force) {
-      sent += await push(to, { title: `🌤️ Sin lluvia para la quedada de hoy (${s.start_time})`, body: `Máximo ${maxP}% de probabilidad en el tramo ${tramo}.\n${det}${fuentes}`, tag: 'tiempo-' + s.id });
+      sent += await push(to, { title: `☀️ NO va a llover en la quedada de hoy (${s.start_time})`, body: `Tramo ${tramo} sin lluvia prevista.\nFuentes: ${sources.join(', ')}.`, tag: 'tiempo-' + s.id });
     }
   }
   return sent;

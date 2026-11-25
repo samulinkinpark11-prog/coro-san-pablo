@@ -2,7 +2,7 @@
    CORO SAN PABLO · v2 (Supabase: usuarios, roles y nube)
    ===================================================== */
 const CFG = window.CORO_CONFIG || {};
-const VERSION = 'v4.21';
+const VERSION = 'v4.22';
 const DEF_SETTINGS = {
   tolerance: 5, mode: 'proporcional', start: '18:00', step: 50,
   tramos: [ {upto:10,pct:100}, {upto:30,pct:75}, {upto:60,pct:50}, {upto:9999,pct:25} ]
@@ -993,9 +993,9 @@ function renderAjustes(){
       <label>Aviso del tiempo (solo a los súper usuarios)</label>
       <div class="row" style="gap:8px"><select id="sWxOn" style="flex:1"><option value="1" ${wxCfg().on?'selected':''}>Avisar si va a llover</option><option value="0" ${wxCfg().on?'':'selected'}>No avisar</option></select>
         <input type="time" id="sWxAt" value="${esc(wxCfg().at)}" style="flex:0 0 120px"></div>
-      <div class="row" style="gap:8px"><div style="flex:1"><label>Avisar desde (% de lluvia)</label><select id="sWxProb">${[50,60,70,80,90,100].map(v=>`<option value="${v}" ${Number(wxCfg().prob)===v?'selected':''}>${v}%</option>`).join('')}</select></div>
+      <div class="row" style="gap:8px"><div style="flex:1"><label>Avisar cuando</label><select id="sWxProb">${[[80,'Sea casi seguro'],[60,'Sea probable']].map(([v,t])=>`<option value="${v}" ${(Number(wxCfg().prob)>=70?80:60)===v?'selected':''}>${t}</option>`).join('')}</select></div>
         <div style="flex:1"><label>Duración del tramo</label><select id="sWxHours">${[2,3,4,5,6].map(v=>`<option value="${v}" ${Number(wxCfg().hours)===v?'selected':''}>${v} horas</option>`).join('')}</select></div></div>
-      <p class="hint">El día de la quedada, a esa hora, la app mira la previsión de Sevilla desde la hora de inicio y durante ese tramo. Si alguna hora pasa del porcentaje, os llega «🌧️ Lluvia prevista» con el detalle hora a hora. También avisa si hay rachas de viento fuertes. Si no hay nada, no molesta.</p>
+      <p class="hint">El día de la quedada, a esa hora, la app mira la previsión de Sevilla (AEMET y varios modelos meteorológicos) durante vuestro tramo. Si va a llover, os llega «🌧️ SÍ va a llover», con las horas y si será débil, moderada o fuerte. Si no va a llover, no os molesta. También avisa si hace mucho viento.</p>
       <button class="btn sec sm" data-act="wxNow">🌤️ Ver el tiempo de hoy ahora</button>
       <label>Sitio habitual (opcional)</label><input id="sPlace" value="${esc(st.place||'')}" placeholder="Se propone al crear cada quedada" autocomplete="off">
       <label>Margen de cortesía (minutos)</label><input type="number" inputmode="numeric" min="0" id="sTol" value="${st.tolerance}">
@@ -1549,14 +1549,14 @@ const A = {
   }
 };
 
-function wxCfg(){ return Object.assign({on:true, at:'08:00', prob:70, hours:3}, S().weather || {}); }
+function wxCfg(){ return Object.assign({on:true, at:'08:00', prob:80, hours:3}, S().weather || {}); }
 function nudgeCfg(){ return Object.assign({every:2, at:'17:00'}, S().nudge || {}); }
 function readSettings(){
   const st=S();
   const nE=document.getElementById('sNudgeEvery'), nA=document.getElementById('sNudgeAt');
   if(nE) st.nudge = {every:Number(nE.value)||0, at:(nA && nA.value) || '17:00'};
   const wO=document.getElementById('sWxOn');
-  if(wO) st.weather = {on: wO.value === '1', at: val('sWxAt') || '08:00', prob: Number(val('sWxProb'))||70, hours: Number(val('sWxHours'))||3};
+  if(wO) st.weather = {on: wO.value === '1', at: val('sWxAt') || '08:00', prob: Number(val('sWxProb'))||80, hours: Number(val('sWxHours'))||3};
   const sS=document.getElementById('sStart'), sT=document.getElementById('sTol'), sP=document.getElementById('sStep');
   if(sS && sS.value) st.start=sS.value;
   const sPl=document.getElementById('sPlace'); if(sPl) st.place=sPl.value.trim();
