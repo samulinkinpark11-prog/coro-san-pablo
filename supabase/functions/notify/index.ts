@@ -6,6 +6,7 @@
 //  Opcionales: VAPID_SUBJECT, APP_URL, SERVICE_KEY
 //  Para mandar también los recordatorios por correo (EmailJS):
 //    EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, EMAILJS_PUBLIC_KEY, EMAILJS_PRIVATE_KEY
+//  Para que el aviso del tiempo use también la previsión oficial de AEMET: AEMET_API_KEY
 // =====================================================================
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
@@ -214,6 +215,86 @@ async function rsvpNudge(now, force = false) {
   return sent;
 }
 
+// Aviso del tiempo a los súper usuarios: el día de la quedada, a las 8:00, mira la previsión de Sevilla
+// (Open-Meteo, gratis y sin clave) en el tramo de la quedada y avisa si va a llover.
+const LAT = 37.3891, LON = -5.9845;   // Sevilla centro
+const WMO = (c) => c >= 95 ? '⛈️ tormenta' : (c >= 80 ? '🌦️ chubascos' : (c >= 61 ? '🌧️ lluvia' : (c >= 51 ? '🌦️ llovizna' : (c >= 45 ? '🌫️ niebla' : (c >= 2 ? '☁️ nubes' : '☀️ despejado')))));
+// Fuentes: 1) Open-Meteo «best match» (probabilidad de lluvia hora a hora), 2) cuatro modelos independientes
+// (ECMWF, ICON de Alemania, GFS de EE. UU., ARPEGE de Francia): qué parte de ellos ve lluvia en cada hora,
+// 3) AEMET (opcional, si pones el secreto AEMET_API_KEY): probabilidad oficial para el municipio de Sevilla.
+const MODELS = { ecmwf_ifs025: 'ECMWF', icon_eu: 'ICON', gfs_seamless: 'GFS', meteofrance_arpege_europe: 'ARPEGE' };
+const OM = 'https://api.open-meteo.com/v1/forecast?latitude=' + LAT + '&longitude=' + LON + '&timezone=Europe%2FMadrid&forecast_days=3';
+async function getJson(u) { const r = await fetch(u); if (!r.ok) throw new Error(u.slice(0, 60) + ' ' + r.status); return r.json(); }
+async function aemet(day) {
+  const key = Deno.env.get('AEMET_API_KEY'); if (!key) return null;
+  try {
+    const meta = await getJson('https://opendata.aemet.es/opendata/api/prediccion/especifica/municipio/horaria/41091?api_key=' + encodeURIComponent(key));
+    if (!meta.datos) return null;
+    const r = await fetch(meta.datos); const txt = new TextDecoder('iso-8859-15').decode(await r.arrayBuffer());
+    const d = (JSON.parse(txt)[0].prediccion.dia || []).find((x) => String(x.fecha).startsWith(day)); if (!d) return null;
+    const prob = (d.probPrecipitacion || []).map((x) => ({ a: Number(String(x.periodo).slice(0, 2)), b: Number(String(x.periodo).slice(2, 4)) || 24, v: Number(x.value) })).filter((x) => !isNaN(x.v));
+    const mm = {}; (d.precipitacion || []).forEach((x) => { mm[Number(x.periodo)] = x.value === 'Ip' ? 0.05 : Number(x.value) || 0; });
+    return { prob: (h) => { const p = prob.find((x) => h >= x.a && h < x.b); return p ? p.v : null; }, mm: (h) => mm[h + 1] ?? mm[h] ?? null };
+  } catch (e) { console.error('aemet', e); return null; }
+}
+async function forecast(day) {
+  const base = await getJson(OM + '&hourly=precipitation_probability,precipitation,weather_code,wind_gusts_10m');
+  const h = base.hourly;
+  const per = await Promise.all(Object.keys(MODELS).map((m) => getJson(OM + '&hourly=precipitation&models=' + m)
+    .then((j) => ({ m, t: j.hourly.time, p: j.hourly.precipitation })).catch((e) => { console.error('modelo', m, e); return null; })));
+  const models = per.filter(Boolean);
+  const ae = await aemet(day);
+  const out = [];
+  h.time.forEach((t, i) => {
+    if (!t.startsWith(day)) return;
+    const hr = Number(t.slice(11, 13));
+    const wet = models.map((m) => { const j = m.t.indexOf(t); return j >= 0 && m.p[j] != null ? (m.p[j] >= 0.2 ? 1 : 0) : null; }).filter((x) => x !== null);
+    const src = { om: h.precipitation_probability[i] ?? null, mod: wet.length ? Math.round(100 * wet.reduce((a, b) => a + b, 0) / wet.length) : null,
+      modN: wet.reduce((a, b) => a + b, 0) + '/' + wet.length, ae: ae ? ae.prob(hr) : null };
+    const vals = [src.om, src.mod, src.ae].filter((x) => x !== null && x !== undefined);
+    out.push({ t, prob: vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0, src,
+      mm: Math.max(h.precipitation[i] ?? 0, ae && ae.mm(hr) != null ? ae.mm(hr) : 0), code: h.weather_code[i] ?? 0, gust: h.wind_gusts_10m[i] ?? 0 });
+  });
+  return { hours: out, sources: ['Open-Meteo', ...models.map((m) => MODELS[m.m]), ...(ae ? ['AEMET'] : [])] };
+}
+async function weatherCheck(now, force = false, onlyUser = null) {
+  const day = now.slice(0, 10), nowMin = toMin(now.slice(11));
+  const { data: st } = await db.from('settings').select('data').eq('id', 1).maybeSingle();
+  const cfg = Object.assign({ on: true, at: '08:00', prob: 70, hours: 3 }, (st && st.data && st.data.weather) || {});
+  if (!force && (!cfg.on || nowMin < toMin(cfg.at) || nowMin >= toMin(cfg.at) + 30)) return 0;
+  const { data: ss0 } = await db.from('sessions').select('*').eq('closed', false).eq('date', day).order('start_time');
+  const ss = (ss0 || []).filter((s) => !s.end_time);
+  if (!ss.length) { if (force && onlyUser) await push([onlyUser], { title: '🌤️ El tiempo', body: 'Hoy no hay ninguna quedada programada.', tag: 'tiempo-hoy' }); return 0; }
+  let hours, sources;
+  try { ({ hours, sources } = await forecast(day)); } catch (e) { console.error('tiempo', e); return 0; }
+  const { data: admins } = await db.from('profiles').select('id').eq('is_admin', true).eq('status', 'approved');
+  const to = onlyUser ? [onlyUser] : (admins || []).map((a) => a.id);
+  let sent = 0;
+  for (const s of ss) {
+    if (!force && !(await once('tiempo-' + s.id))) continue;
+    const a = toMin(s.start_time), b = a + Number(cfg.hours || 3) * 60;
+    const win = hours.filter((x) => { const m = toMin(x.t.slice(11)); return m + 60 > a && m < b; });   // horas que tocan el tramo
+    if (!win.length) continue;
+    const maxP = Math.max(...win.map((x) => x.prob)), mm = win.reduce((t, x) => t + x.mm, 0), gust = Math.max(...win.map((x) => x.gust));
+    const rainy = win.filter((x) => x.prob >= Number(cfg.prob));
+    const det = win.map((x) => `${x.t.slice(11, 16)} ${WMO(x.code)} ${x.prob}%${x.mm >= 0.1 ? ' · ' + x.mm.toFixed(1) + ' mm' : ''}`).join('\n');
+    const pk = win.reduce((m, x) => x.prob > m.prob ? x : m, win[0]).src;
+    const fuentes = `\nEn la peor hora: ${[pk.ae != null ? 'AEMET ' + pk.ae + '%' : '', pk.om != null ? 'Open-Meteo ' + pk.om + '%' : '', pk.mod != null ? 'modelos con lluvia ' + pk.modN : ''].filter(Boolean).join(' · ')}.\nFuentes: ${sources.join(', ')}.`;
+    const tramo = `${s.start_time}–${String(Math.floor(b / 60) % 24).padStart(2, '0')}:${String(b % 60).padStart(2, '0')}`;
+    if (rainy.length) {
+      const desde = rainy[0].t.slice(11, 16);
+      sent += await push(to, { title: `🌧️ Lluvia prevista en la quedada de hoy (${s.start_time})`,
+        body: `Hasta ${maxP}% de probabilidad desde las ${desde}, ${mm.toFixed(1)} mm en el tramo ${tramo}${gust >= 50 ? ` y rachas de ${Math.round(gust)} km/h` : ''}. Decidid si se sale; si se suspende, mandad un aviso.\n${det}${fuentes}`,
+        tag: 'tiempo-' + s.id });
+    } else if (gust >= 60) {
+      sent += await push(to, { title: `💨 Mucho viento en la quedada de hoy (${s.start_time})`, body: `Rachas de hasta ${Math.round(gust)} km/h en el tramo ${tramo}.\n${det}${fuentes}`, tag: 'tiempo-' + s.id });
+    } else if (force) {
+      sent += await push(to, { title: `🌤️ Sin lluvia para la quedada de hoy (${s.start_time})`, body: `Máximo ${maxP}% de probabilidad en el tramo ${tramo}.\n${det}${fuentes}`, tag: 'tiempo-' + s.id });
+    }
+  }
+  return sent;
+}
+
 async function reminders() {
   const now = madridNow();
   const { data: ss } = await db.from('sessions').select('*').eq('closed', false).eq('reminded', false);
@@ -232,6 +313,7 @@ async function reminders() {
   }
   sent += await morningAlarms(now);
   sent += await rsvpNudge(now);
+  sent += await weatherCheck(now);
   return sent;
 }
 
@@ -277,6 +359,11 @@ Deno.serve(async (req) => {
       return json({ ok: true, sent: await push(await approvedIds(an.audience === 'admins'), {
         title: '📣 ' + (an.title || 'Aviso del coro'), body: an.body, tag: 'aviso-' + an.id
       }) });
+    }
+
+    if (type === 'weather_check') {
+      if (!me.is_admin || me.status !== 'approved') return json({ error: 'solo súper usuarios' }, 403);
+      return json({ ok: true, sent: await weatherCheck(madridNow(), true, me.id) });
     }
 
     if (type === 'rsvp_nudge') {
